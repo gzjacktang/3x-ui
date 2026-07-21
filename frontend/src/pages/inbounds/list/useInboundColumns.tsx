@@ -1,12 +1,11 @@
 import { useMemo, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Popover, Switch, Tag, Tooltip, type TableColumnType } from 'antd';
+import { Popover, Switch, Tag, type TableColumnType } from 'antd';
 import { TeamOutlined } from '@ant-design/icons';
 
 import { SizeFormatter, IntlUtil, ColorUtils } from '@/utils';
 import { InfinityIcon } from '@/components/ui';
 import { useDatepicker } from '@/hooks/useDatepicker';
-import type { NodeRecord } from '@/api/queries/useNodesQuery';
 import { coerceInboundJsonField } from '@/models/dbinbound';
 
 import { RowActionsCell } from './RowActions';
@@ -24,12 +23,8 @@ import type { ClientCountEntry, DBInboundRecord, InboundSpeedEntry, RowAction } 
 
 interface UseInboundColumnsParams {
   hasAnyRemark: boolean;
-  hasAnySubSortIndex: boolean;
-  hasActiveNode: boolean;
-  nodesById: Map<number, NodeRecord>;
   clientCount: Record<number, ClientCountEntry>;
   inboundSpeed: Record<number, InboundSpeedEntry>;
-  subEnable: boolean;
   expireDiff: number;
   trafficDiff: number;
   onRowAction: (action: { key: RowAction; dbInbound: DBInboundRecord }) => void;
@@ -38,12 +33,8 @@ interface UseInboundColumnsParams {
 
 export function useInboundColumns({
   hasAnyRemark,
-  hasAnySubSortIndex,
-  hasActiveNode,
-  nodesById,
   clientCount,
   inboundSpeed,
-  subEnable,
   expireDiff,
   trafficDiff,
   onRowAction,
@@ -56,11 +47,6 @@ export function useInboundColumns({
     const compareText = (a: string | undefined | null, b: string | undefined | null) => (
       (a || '').localeCompare(b || '', undefined, { numeric: true, sensitivity: 'base' })
     );
-
-    const nodeName = (record: DBInboundRecord) => {
-      if (record.nodeId == null) return t('pages.inbounds.localPanel');
-      return nodesById.get(record.nodeId)?.name || `node #${record.nodeId}`;
-    };
 
     const clientTotal = (record: DBInboundRecord) => (
       (clientCount[record.id] || fallbackClientCount(record))?.clients ?? 0
@@ -114,7 +100,6 @@ export function useInboundColumns({
         render: (_, record) => (
           <RowActionsCell
             record={record}
-            subEnable={subEnable}
             hasClients={(clientCount[record.id]?.clients || 0) > 0}
             onClick={(key) => onRowAction({ key, dbInbound: record })}
           />
@@ -142,43 +127,6 @@ export function useInboundColumns({
         align: 'center',
         width: 90,
         sorter: (a, b) => compareText(a.remark, b.remark),
-      });
-    }
-
-    if (hasActiveNode) {
-      cols.push({
-        title: t('pages.inbounds.node'),
-        key: 'node',
-        align: 'center',
-        width: 130,
-        sorter: (a, b) => compareText(nodeName(a), nodeName(b)),
-        render: (_, record) => {
-          if (record.nodeId == null) {
-            return <Tag color="default">{t('pages.inbounds.localPanel')}</Tag>;
-          }
-          const node = nodesById.get(record.nodeId);
-          if (!node) {
-            return <Tag color="orange">node #{record.nodeId}</Tag>;
-          }
-          return (
-            <Tag color={node.status === 'online' ? 'blue' : 'red'}>{node.name}</Tag>
-          );
-        },
-      });
-    }
-
-    if (hasAnySubSortIndex) {
-      cols.push({
-        title: (
-          <Tooltip title={t('pages.inbounds.form.subSortIndex')}>
-            {t('pages.inbounds.subSortIndex')}
-          </Tooltip>
-        ),
-        dataIndex: 'subSortIndex',
-        key: 'subSortIndex',
-        align: 'right',
-        width: 90,
-        sorter: (a, b) => (a.subSortIndex ?? 1) - (b.subSortIndex ?? 1),
       });
     }
 
@@ -236,7 +184,7 @@ export function useInboundColumns({
               </Tag>
               {cc.active.length > 0 ? (
                 <Popover
-                  title={t('subscription.active')}
+                  title={t('enabled')}
                   content={(
                     <div className="client-email-list">
                       {cc.active.map((e) => <div key={e}>{e}</div>)}
@@ -357,5 +305,5 @@ export function useInboundColumns({
     );
 
     return cols;
-  }, [t, hasAnyRemark, hasAnySubSortIndex, hasActiveNode, nodesById, clientCount, inboundSpeed, subEnable, expireDiff, trafficDiff, datepicker, onRowAction, onSwitchEnable]);
+  }, [t, hasAnyRemark, clientCount, inboundSpeed, expireDiff, trafficDiff, datepicker, onRowAction, onSwitchEnable]);
 }

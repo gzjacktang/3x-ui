@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Input, Modal, Select, Space, Spin, Table, Tag, Typography, message } from 'antd';
+import { Alert, Input, Modal, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
 import { HttpUtil } from '@/utils';
@@ -22,14 +22,12 @@ interface BulkAttachResult {
 
 interface ClientRow {
   email: string;
-  group: string;
   enable: boolean;
   alreadyAttached: boolean;
 }
 
 interface RawClient {
   email?: string;
-  group?: string;
   enable?: boolean;
   inboundIds?: number[] | null;
 }
@@ -47,14 +45,12 @@ export default function AttachExistingClientsModal({
   const [clientRows, setClientRows] = useState<ClientRow[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
   const [search, setSearch] = useState('');
-  const [groupFilter, setGroupFilter] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!open || !target) return;
     let cancelled = false;
     setLoading(true);
     setSearch('');
-    setGroupFilter(undefined);
     HttpUtil.get('/panel/api/clients/list', undefined, { silent: true })
       .then((msg) => {
         if (cancelled) return;
@@ -62,7 +58,6 @@ export default function AttachExistingClientsModal({
         const rows: ClientRow[] = list
           .map((c) => ({
             email: (c?.email || '').trim(),
-            group: (c?.group || '').trim(),
             enable: c?.enable !== false,
             alreadyAttached: Array.isArray(c?.inboundIds) && c.inboundIds.includes(target.id),
           }))
@@ -78,12 +73,6 @@ export default function AttachExistingClientsModal({
     };
   }, [open, target]);
 
-  const groupOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of clientRows) if (r.group) set.add(r.group);
-    return [...set].sort((a, b) => a.localeCompare(b)).map((g) => ({ value: g, label: g }));
-  }, [clientRows]);
-
   const attachableCount = useMemo(
     () => clientRows.filter((r) => !r.alreadyAttached).length,
     [clientRows],
@@ -92,11 +81,10 @@ export default function AttachExistingClientsModal({
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return clientRows.filter((r) => {
-      if (groupFilter && r.group !== groupFilter) return false;
       if (!q) return true;
-      return r.email.toLowerCase().includes(q) || r.group.toLowerCase().includes(q);
+      return r.email.toLowerCase().includes(q);
     });
-  }, [clientRows, search, groupFilter]);
+  }, [clientRows, search]);
 
   const columns: ColumnsType<ClientRow> = useMemo(
     () => [
@@ -105,15 +93,6 @@ export default function AttachExistingClientsModal({
         dataIndex: 'email',
         key: 'email',
         ellipsis: true,
-      },
-      {
-        title: t('pages.clients.group'),
-        dataIndex: 'group',
-        key: 'group',
-        width: 150,
-        ellipsis: true,
-        render: (group: string) =>
-          group ? <Tag color="geekblue">{group}</Tag> : <span style={{ color: 'rgba(0,0,0,0.45)' }}>—</span>,
       },
       {
         title: t('enable'),
@@ -185,28 +164,14 @@ export default function AttachExistingClientsModal({
         <Spin spinning={loading}>
           <Space orientation="vertical" size="small" style={{ width: '100%' }}>
             <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
-              <Space wrap>
-                <Input.Search
-                  allowClear
-                  aria-label={t('search')}
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder={t('pages.inbounds.attachClientsSearchPlaceholder')}
-                  style={{ width: 260 }}
-                />
-                {groupOptions.length > 0 && (
-                  <Select
-                    allowClear
-                    aria-label={t('pages.clients.group')}
-                    value={groupFilter}
-                    onChange={(v) => setGroupFilter(v)}
-                    options={groupOptions}
-                    placeholder={t('pages.clients.group')}
-                    style={{ minWidth: 160 }}
-                    showSearch={{ optionFilterProp: 'label' }}
-                  />
-                )}
-              </Space>
+              <Input.Search
+                allowClear
+                aria-label={t('search')}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('pages.inbounds.attachClientsSearchPlaceholder')}
+                style={{ width: 260 }}
+              />
               <Typography.Text type="secondary">
                 {t('pages.inbounds.attachClientsSelectedCount', {
                   selected: selectedEmails.length,

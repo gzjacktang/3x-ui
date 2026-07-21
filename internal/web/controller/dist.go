@@ -2,7 +2,6 @@ package controller
 
 import (
 	"bytes"
-	"encoding/json"
 	htmlpkg "html"
 	"io/fs"
 	"net/http"
@@ -23,53 +22,6 @@ func SetDistFS(fsys fs.FS) {
 }
 
 var distPageBuildTime = time.Now()
-
-// ServeOpenAPISpec returns the generated OpenAPI 3.0 description of the
-// panel API. Postman / Insomnia / openapi-generator consume this URL
-// directly; the in-panel Swagger UI page also fetches it. The spec is
-// produced at frontend build time by scripts/build-openapi.mjs and
-// embedded into the binary via the dist FS.
-func ServeOpenAPISpec(c *gin.Context) {
-	body, err := fs.ReadFile(distFS, "dist/openapi.json")
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"success": false, "msg": "openapi.json not found"})
-		return
-	}
-
-	// The embedded spec ships with `servers: [{url: "/"}]`. When the panel runs
-	// under a non-root web base path, Swagger UI "Try it out" and external
-	// generators must target that prefix, so rewrite the single server entry to
-	// the runtime base path before serving.
-	if basePath := c.GetString("base_path"); basePath != "" && basePath != "/" {
-		if rebuilt, err := withServerBasePath(body, basePath); err != nil {
-			logger.Warning("openapi.json: could not inject base path:", err)
-		} else {
-			body = rebuilt
-		}
-	}
-
-	c.Header("Cache-Control", "public, max-age=300")
-	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
-}
-
-// withServerBasePath rewrites the spec's `servers` entry so requests target the
-// panel's configured web base path. Only the top-level `servers` field is
-// replaced; every other field is preserved verbatim via json.RawMessage.
-func withServerBasePath(spec []byte, basePath string) ([]byte, error) {
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(spec, &doc); err != nil {
-		return nil, err
-	}
-	servers, err := json.Marshal([]map[string]string{{
-		"url":         strings.TrimSuffix(basePath, "/"),
-		"description": "Current panel",
-	}})
-	if err != nil {
-		return nil, err
-	}
-	doc["servers"] = servers
-	return json.Marshal(doc)
-}
 
 func serveDistPage(c *gin.Context, name string) {
 	body, err := fs.ReadFile(distFS, "dist/"+name)

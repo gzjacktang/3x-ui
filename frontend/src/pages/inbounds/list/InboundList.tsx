@@ -6,7 +6,6 @@ import {
   Checkbox,
   Dropdown,
   Input,
-  Select,
   Space,
   Switch,
   Table,
@@ -44,9 +43,6 @@ export default function InboundList({
   trafficDiff,
   pageSize,
   isMobile,
-  subEnable,
-  nodesById,
-  hasActiveNode,
   onAddInbound,
   onGeneralAction,
   onRowAction,
@@ -55,37 +51,17 @@ export default function InboundList({
   const { t } = useTranslation();
   const [statsRecord, setStatsRecord] = useState<DBInboundRecord | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
-  // Node filter (#4997): 'all' shows everything, 0 is the local-panel
-  // sentinel (inbounds without a nodeId), otherwise a node id. Session-only.
-  const [nodeFilter, setNodeFilter] = useState<number | 'all'>('all');
   const [searchKey, setSearchKey] = useState('');
 
-  const showNodeFilter = useMemo(
-    () => nodesById.size > 0 || dbInbounds.some((ib) => ib.nodeId != null),
-    [nodesById, dbInbounds],
-  );
-
-  const nodeFilterOptions = useMemo(
-    () => [
-      { value: 'all' as const, label: t('pages.clients.filters.nodes') },
-      { value: 0, label: t('pages.clients.filters.localPanel') },
-      ...Array.from(nodesById.values()).map((n) => ({ value: n.id, label: n.name || `#${n.id}` })),
-    ],
-    [nodesById, t],
-  );
-
   const visibleInbounds = useMemo(() => {
-    let list = dbInbounds;
-    if (nodeFilter === 0) list = list.filter((ib) => ib.nodeId == null);
-    else if (nodeFilter !== 'all') list = list.filter((ib) => ib.nodeId === nodeFilter);
     const q = searchKey.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter((ib) => (
+    if (!q) return dbInbounds;
+    return dbInbounds.filter((ib) => (
       (ib.remark || '').toLowerCase().includes(q)
       || String(ib.port).includes(q)
       || (ib.protocol || '').toLowerCase().includes(q)
     ));
-  }, [dbInbounds, nodeFilter, searchKey]);
+  }, [dbInbounds, searchKey]);
 
   const onSwitchEnable = useCallback(async (dbInbound: DBInboundRecord, next: boolean) => {
     const previous = dbInbound.enable;
@@ -102,11 +78,6 @@ export default function InboundList({
 
   const hasAnyRemark = useMemo(
     () => dbInbounds.some((i) => typeof i.remark === 'string' && i.remark.trim() !== ''),
-    [dbInbounds],
-  );
-
-  const hasAnySubSortIndex = useMemo(
-    () => dbInbounds.some((i) => (i.subSortIndex ?? 1) > 1),
     [dbInbounds],
   );
 
@@ -132,12 +103,8 @@ export default function InboundList({
 
   const columns = useInboundColumns({
     hasAnyRemark,
-    hasAnySubSortIndex,
-    hasActiveNode,
-    nodesById,
     clientCount,
     inboundSpeed,
-    subEnable,
     expireDiff,
     trafficDiff,
     onRowAction,
@@ -158,9 +125,6 @@ export default function InboundList({
     items: [
       { key: 'import', icon: <ImportOutlined />, label: t('pages.inbounds.importInbound') },
       { key: 'export', icon: <ExportOutlined />, label: t('pages.inbounds.export') },
-      ...(subEnable
-        ? [{ key: 'subs', icon: <ExportOutlined />, label: `${t('pages.inbounds.export')} — ${t('pages.settings.subSettings')}` }]
-        : []),
       { key: 'resetInbounds', icon: <ReloadOutlined />, label: t('pages.inbounds.resetAllTraffic') },
     ],
     onClick: ({ key }) => onGeneralAction(key as GeneralAction),
@@ -179,17 +143,6 @@ export default function InboundList({
               {!isMobile && t('pages.inbounds.generalActions')}
             </Button>
           </Dropdown>
-          {showNodeFilter && (
-            <Select
-              value={nodeFilter}
-              onChange={(v) => setNodeFilter(v)}
-              options={nodeFilterOptions}
-              showSearch
-              popupMatchSelectWidth={false}
-              style={{ minWidth: isMobile ? 90 : 140 }}
-              aria-label={t('pages.clients.filters.nodes')}
-            />
-          )}
           <Input
             value={searchKey}
             onChange={(e) => setSearchKey(e.target.value)}
@@ -263,7 +216,7 @@ export default function InboundList({
                         trigger={['click']}
                         placement="bottomRight"
                         menu={{
-                          items: buildRowActionsMenu({ record, subEnable, t, isMobile: true, hasClients: (clientCount[record.id]?.clients || 0) > 0 }),
+                          items: buildRowActionsMenu({ record, t, isMobile: true, hasClients: (clientCount[record.id]?.clients || 0) > 0 }),
                           onClick: ({ key }) => onRowAction({ key: key as RowAction, dbInbound: record }),
                         }}
                       >
@@ -304,8 +257,6 @@ export default function InboundList({
       <InboundStatsModal
         open={isMobile && !!statsRecord}
         record={statsRecord}
-        hasActiveNode={hasActiveNode}
-        nodesById={nodesById}
         clientCount={clientCount}
         inboundSpeed={inboundSpeed}
         trafficDiff={trafficDiff}

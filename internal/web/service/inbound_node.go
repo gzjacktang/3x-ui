@@ -572,11 +572,6 @@ func (s *InboundService) setRemoteTrafficLocked(nodeID int, snap *runtime.Traffi
 			if newIb.Tag != snapIb.Tag {
 				tagToCentral[newIb.Tag] = &newIb
 			}
-			if rows := adoptedHostRows(snap.HostGroups, snapIb.Id, newIb.Id); len(rows) > 0 {
-				if err := tx.Create(&rows).Error; err != nil {
-					logger.Warningf("setRemoteTraffic: adopt host rows for tag %q failed: %v", newIb.Tag, err)
-				}
-			}
 			newInboundIDs[newIb.Id] = struct{}{}
 			structuralChange = true
 			continue

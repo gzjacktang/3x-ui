@@ -32,90 +32,11 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
-	"github.com/mhsanaei/3x-ui/v3/internal/util/sys"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
 	"github.com/google/uuid"
 	utls "github.com/refraction-networking/utls"
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/shirou/gopsutil/v4/host"
-	"github.com/shirou/gopsutil/v4/load"
-	"github.com/shirou/gopsutil/v4/mem"
-	"github.com/shirou/gopsutil/v4/net"
 )
-
-// ProcessState represents the current state of a system process.
-type ProcessState string
-
-// Process state constants
-const (
-	Running ProcessState = "running" // Process is running normally
-	Stop    ProcessState = "stop"    // Process is stopped
-	Error   ProcessState = "error"   // Process is in error state
-)
-
-// Status represents comprehensive system and application status information.
-// It includes CPU, memory, disk, network statistics, and Xray process status.
-type Status struct {
-	T           time.Time `json:"-"`
-	Cpu         float64   `json:"cpu"`
-	CpuCores    int       `json:"cpuCores"`
-	LogicalPro  int       `json:"logicalPro"`
-	CpuSpeedMhz float64   `json:"cpuSpeedMhz"`
-	Mem         struct {
-		Current uint64 `json:"current"`
-		Total   uint64 `json:"total"`
-	} `json:"mem"`
-	Swap struct {
-		Current uint64 `json:"current"`
-		Total   uint64 `json:"total"`
-	} `json:"swap"`
-	Disk struct {
-		Current uint64 `json:"current"`
-		Total   uint64 `json:"total"`
-	} `json:"disk"`
-	DiskIO struct {
-		Read  uint64 `json:"read"`
-		Write uint64 `json:"write"`
-	} `json:"diskIO"`
-	DiskTraffic struct {
-		Read  uint64 `json:"read"`
-		Write uint64 `json:"write"`
-	} `json:"diskTraffic"`
-	Xray struct {
-		State    ProcessState `json:"state"`
-		ErrorMsg string       `json:"errorMsg"`
-		Version  string       `json:"version"`
-	} `json:"xray"`
-	PanelVersion string    `json:"panelVersion"`
-	PanelGuid    string    `json:"panelGuid"`
-	Uptime       uint64    `json:"uptime"`
-	Loads        []float64 `json:"loads"`
-	TcpCount     int       `json:"tcpCount"`
-	UdpCount     int       `json:"udpCount"`
-	NetIO        struct {
-		Up      uint64 `json:"up"`
-		Down    uint64 `json:"down"`
-		PktUp   uint64 `json:"pktUp"`
-		PktDown uint64 `json:"pktDown"`
-	} `json:"netIO"`
-	NetTraffic struct {
-		Sent    uint64 `json:"sent"`
-		Recv    uint64 `json:"recv"`
-		PktSent uint64 `json:"pktSent"`
-		PktRecv uint64 `json:"pktRecv"`
-	} `json:"netTraffic"`
-	PublicIP struct {
-		IPv4 string `json:"ipv4"`
-		IPv6 string `json:"ipv6"`
-	} `json:"publicIP"`
-	AppStats struct {
-		Threads uint32 `json:"threads"`
-		Mem     uint64 `json:"mem"`
-		Uptime  uint64 `json:"uptime"`
-	} `json:"appStats"`
-}
 
 // Release represents information about a software release from GitHub.
 type Release struct {
@@ -128,22 +49,13 @@ type Release struct {
 // ServerService provides business logic for server monitoring and management.
 // It handles system status collection, IP detection, and application statistics.
 type ServerService struct {
-	xrayService        XrayService
-	inboundService     InboundService
-	settingService     SettingService
-	cachedIPv4         string
-	cachedIPv6         string
-	noIPv6             bool
-	mu                 sync.Mutex
-	lastCPUTimes       cpu.TimesStat
-	hasLastCPUSample   bool
-	hasNativeCPUSample bool
-	emaCPU             float64
-	cachedCpuSpeedMhz  float64
-	lastCpuInfoAttempt time.Time
-
-	lastStatusMu sync.RWMutex
-	lastStatus   *Status
+	xrayService    XrayService
+	inboundService InboundService
+	settingService SettingService
+	cachedIPv4     string
+	cachedIPv6     string
+	noIPv6         bool
+	mu             sync.Mutex
 
 	versionsCacheMu sync.Mutex
 	versionsCache   *cachedXrayVersions
@@ -162,37 +74,6 @@ type cachedXrayVersions struct {
 // is purely informational (rendered in the "switch Xray version" picker) so a
 // quarter-hour staleness window is fine and saves the API budget.
 const xrayVersionsCacheTTL = 15 * time.Minute
-
-// allowedHistoryBuckets is the bucket-second whitelist for time-series
-// aggregation endpoints (server + node metrics). Restricting it prevents
-// callers from triggering arbitrary aggregation work and keeps the
-// frontend's bucket selector self-documenting.
-var allowedHistoryBuckets = map[int]bool{
-	2:     true, // 2m
-	30:    true, // 30m
-	60:    true, // 1h
-	180:   true, // 3h
-	360:   true, // 6h
-	720:   true, // 12h
-	1440:  true, // 24h
-	2880:  true, // 2d
-	10080: true, // 7d
-}
-
-// IsAllowedHistoryBucket reports whether a bucket-seconds value is in the
-// whitelist used by /server/history, /server/cpuHistory, /server/xrayMetricsHistory,
-// /server/xrayObservatoryHistory, and /nodes/history.
-func IsAllowedHistoryBucket(bucketSeconds int) bool {
-	return allowedHistoryBuckets[bucketSeconds]
-}
-
-// LastStatus returns the most recent Status snapshot collected by
-// RefreshStatus. Safe for concurrent readers.
-func (s *ServerService) LastStatus() *Status {
-	s.lastStatusMu.RLock()
-	defer s.lastStatusMu.RUnlock()
-	return s.lastStatus
-}
 
 // Fail2banStatus tells the frontend whether the per-client IP limit can
 // actually be enforced. Enforcement depends on fail2ban, so a limit set
@@ -239,22 +120,6 @@ func (s *ServerService) isFail2banInstalled() bool {
 	s.fail2banInstalled = err == nil
 	s.fail2banCheckedAt = time.Now()
 	return s.fail2banInstalled
-}
-
-// RefreshStatus collects a new system snapshot, stores it as LastStatus, and
-// appends it to the system-metrics time series. Returns the new snapshot (may
-// be nil if collection failed). Called by the background ticker; the caller is
-// responsible for any side effects (websocket broadcast, xray metrics sample).
-func (s *ServerService) RefreshStatus() *Status {
-	next := s.GetStatus(s.LastStatus())
-	if next == nil {
-		return nil
-	}
-	s.lastStatusMu.Lock()
-	s.lastStatus = next
-	s.lastStatusMu.Unlock()
-	s.AppendStatusSample(time.Now(), next)
-	return next
 }
 
 // GetXrayVersionsCached wraps GetXrayVersions with a TTL cache. On fetch
@@ -317,25 +182,6 @@ func (s *ServerService) GetDefaultLogOutboundTags() (freedoms, blackholes []stri
 		blackholes = []string{"blocked"}
 	}
 	return freedoms, blackholes
-}
-
-// AggregateCpuHistory returns up to maxPoints averaged buckets of size bucketSeconds.
-// Kept for back-compat with the original /panel/api/server/cpuHistory/:bucket route;
-// the response key is "cpu" (not "v") so legacy consumers parse unchanged.
-func (s *ServerService) AggregateCpuHistory(bucketSeconds int, maxPoints int) []map[string]any {
-	out := systemMetrics.aggregate("cpu", bucketSeconds, maxPoints)
-	for _, p := range out {
-		p["cpu"] = p["v"]
-		delete(p, "v")
-	}
-	return out
-}
-
-// AggregateSystemMetric returns up to maxPoints averaged buckets for any
-// known system metric (see SystemMetricKeys). Output points have keys
-// {"t": unixSec, "v": value}; the caller decides how to format the value.
-func (s *ServerService) AggregateSystemMetric(metric string, bucketSeconds int, maxPoints int) []map[string]any {
-	return systemMetrics.aggregate(metric, bucketSeconds, maxPoints)
 }
 
 type LogEntry struct {
@@ -429,339 +275,6 @@ func (s *ServerService) resolvePublicIPs() {
 	if s.cachedIPv6 == "N/A" {
 		s.noIPv6 = true
 	}
-}
-
-func (s *ServerService) GetStatus(lastStatus *Status) *Status {
-	now := time.Now()
-	status := &Status{
-		T: now,
-	}
-
-	// CPU stats
-	util, err := s.sampleCPUUtilization()
-	if err != nil {
-		logger.Warning("get cpu percent failed:", err)
-	} else {
-		status.Cpu = util
-	}
-
-	status.CpuCores, err = cpu.Counts(false)
-	if err != nil {
-		logger.Warning("get cpu cores count failed:", err)
-	}
-
-	status.LogicalPro = runtime.NumCPU()
-
-	if status.CpuSpeedMhz = s.cachedCpuSpeedMhz; s.cachedCpuSpeedMhz == 0 && time.Since(s.lastCpuInfoAttempt) > 5*time.Minute {
-		s.lastCpuInfoAttempt = time.Now()
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			cpuInfos, err := cpu.Info()
-			if err != nil {
-				logger.Warning("get cpu info failed:", err)
-				return
-			}
-			if len(cpuInfos) > 0 {
-				s.cachedCpuSpeedMhz = cpuInfos[0].Mhz
-				status.CpuSpeedMhz = s.cachedCpuSpeedMhz
-			} else {
-				logger.Warning("could not find cpu info")
-			}
-		}()
-		select {
-		case <-done:
-		case <-time.After(1500 * time.Millisecond):
-			logger.Warning("cpu info query timed out; will retry later")
-		}
-	} else if s.cachedCpuSpeedMhz != 0 {
-		status.CpuSpeedMhz = s.cachedCpuSpeedMhz
-	}
-
-	// Uptime
-	upTime, err := host.Uptime()
-	if err != nil {
-		logger.Warning("get uptime failed:", err)
-	} else {
-		status.Uptime = upTime
-	}
-
-	// Memory stats
-	memInfo, err := mem.VirtualMemory()
-	if err != nil {
-		logger.Warning("get virtual memory failed:", err)
-	} else {
-		status.Mem.Current = memInfo.Used
-		status.Mem.Total = memInfo.Total
-	}
-
-	swapInfo, err := mem.SwapMemory()
-	if err != nil {
-		logger.Warning("get swap memory failed:", err)
-	} else {
-		status.Swap.Current = swapInfo.Used
-		status.Swap.Total = swapInfo.Total
-	}
-
-	// Disk stats
-	diskInfo, err := disk.Usage("/")
-	if err != nil {
-		logger.Warning("get disk usage failed:", err)
-	} else {
-		status.Disk.Current = diskInfo.Used
-		status.Disk.Total = diskInfo.Total
-	}
-
-	diskIOStats, err := disk.IOCounters()
-	if err != nil {
-		logger.Warning("get disk io counters failed:", err)
-	} else {
-		var totalRead, totalWrite uint64
-		for _, counter := range diskIOStats {
-			totalRead += counter.ReadBytes
-			totalWrite += counter.WriteBytes
-		}
-		status.DiskTraffic.Read = totalRead
-		status.DiskTraffic.Write = totalWrite
-
-		if lastStatus != nil {
-			duration := now.Sub(lastStatus.T)
-			seconds := float64(duration) / float64(time.Second)
-			if seconds > 0 && status.DiskTraffic.Read >= lastStatus.DiskTraffic.Read {
-				status.DiskIO.Read = uint64(float64(status.DiskTraffic.Read-lastStatus.DiskTraffic.Read) / seconds)
-			}
-			if seconds > 0 && status.DiskTraffic.Write >= lastStatus.DiskTraffic.Write {
-				status.DiskIO.Write = uint64(float64(status.DiskTraffic.Write-lastStatus.DiskTraffic.Write) / seconds)
-			}
-		}
-	}
-
-	// Load averages
-	avgState, err := load.Avg()
-	if err != nil {
-		logger.Warning("get load avg failed:", err)
-	} else {
-		status.Loads = []float64{avgState.Load1, avgState.Load5, avgState.Load15}
-	}
-
-	// Network stats
-	ioStats, err := net.IOCounters(true)
-	if err != nil {
-		logger.Warning("get io counters failed:", err)
-	} else {
-		var totalSent, totalRecv, totalPktSent, totalPktRecv uint64
-		for _, iface := range ioStats {
-			name := strings.ToLower(iface.Name)
-			if isVirtualInterface(name) {
-				continue
-			}
-			totalSent += iface.BytesSent
-			totalRecv += iface.BytesRecv
-			totalPktSent += iface.PacketsSent
-			totalPktRecv += iface.PacketsRecv
-		}
-		status.NetTraffic.Sent = totalSent
-		status.NetTraffic.Recv = totalRecv
-		status.NetTraffic.PktSent = totalPktSent
-		status.NetTraffic.PktRecv = totalPktRecv
-
-		if lastStatus != nil {
-			duration := now.Sub(lastStatus.T)
-			seconds := float64(duration) / float64(time.Second)
-			up := uint64(float64(status.NetTraffic.Sent-lastStatus.NetTraffic.Sent) / seconds)
-			down := uint64(float64(status.NetTraffic.Recv-lastStatus.NetTraffic.Recv) / seconds)
-			status.NetIO.Up = up
-			status.NetIO.Down = down
-			if seconds > 0 && status.NetTraffic.PktSent >= lastStatus.NetTraffic.PktSent {
-				status.NetIO.PktUp = uint64(float64(status.NetTraffic.PktSent-lastStatus.NetTraffic.PktSent) / seconds)
-			}
-			if seconds > 0 && status.NetTraffic.PktRecv >= lastStatus.NetTraffic.PktRecv {
-				status.NetIO.PktDown = uint64(float64(status.NetTraffic.PktRecv-lastStatus.NetTraffic.PktRecv) / seconds)
-			}
-		}
-	}
-
-	// TCP/UDP connections
-	status.TcpCount, err = sys.GetTCPCount()
-	if err != nil {
-		logger.Warning("get tcp connections failed:", err)
-	}
-
-	status.UdpCount, err = sys.GetUDPCount()
-	if err != nil {
-		logger.Warning("get udp connections failed:", err)
-	}
-
-	s.resolvePublicIPs()
-	status.PublicIP.IPv4 = s.cachedIPv4
-	status.PublicIP.IPv6 = s.cachedIPv6
-
-	// Xray status
-	if s.xrayService.IsXrayRunning() {
-		status.Xray.State = Running
-		status.Xray.ErrorMsg = ""
-	} else {
-		err := s.xrayService.GetXrayErr()
-		if err != nil {
-			status.Xray.State = Error
-		} else {
-			status.Xray.State = Stop
-		}
-		status.Xray.ErrorMsg = s.xrayService.GetXrayResult()
-	}
-	status.Xray.Version = s.xrayService.GetXrayVersion()
-	status.PanelVersion = config.GetPanelVersion()
-	if guid, err := s.settingService.GetPanelGuid(); err == nil {
-		status.PanelGuid = guid
-	}
-
-	// Application stats
-	if rss := sys.SelfRSS(); rss > 0 {
-		status.AppStats.Mem = rss
-	} else {
-		var rtm runtime.MemStats
-		runtime.ReadMemStats(&rtm)
-		status.AppStats.Mem = rtm.Sys
-	}
-	status.AppStats.Threads = uint32(runtime.NumGoroutine())
-	if p != nil && p.IsRunning() {
-		status.AppStats.Uptime = p.GetUptime()
-	} else {
-		status.AppStats.Uptime = 0
-	}
-
-	return status
-}
-
-// AppendCpuSample is preserved for callers that only have the CPU number.
-// New callers should prefer AppendStatusSample which writes the full set.
-func (s *ServerService) AppendCpuSample(t time.Time, v float64) {
-	systemMetrics.append("cpu", t, v)
-}
-
-// AppendStatusSample writes one tick of every metric we keep — CPU, memory
-// percent, network throughput (bytes/s), online client count, and the three
-// load averages. Called by RefreshStatus on the same @2s cadence as
-// AppendCpuSample, so all series stay aligned.
-func (s *ServerService) AppendStatusSample(t time.Time, status *Status) {
-	if status == nil {
-		return
-	}
-	systemMetrics.append("cpu", t, status.Cpu)
-	if status.Mem.Total > 0 {
-		systemMetrics.append("mem", t, float64(status.Mem.Current)*100.0/float64(status.Mem.Total))
-	}
-	if status.Swap.Total > 0 {
-		systemMetrics.append("swap", t, float64(status.Swap.Current)*100.0/float64(status.Swap.Total))
-	} else {
-		systemMetrics.append("swap", t, 0)
-	}
-	systemMetrics.append("netUp", t, float64(status.NetIO.Up))
-	systemMetrics.append("netDown", t, float64(status.NetIO.Down))
-	systemMetrics.append("diskRead", t, float64(status.DiskIO.Read))
-	systemMetrics.append("diskWrite", t, float64(status.DiskIO.Write))
-	if status.Disk.Total > 0 {
-		systemMetrics.append("diskUsage", t, float64(status.Disk.Current)*100.0/float64(status.Disk.Total))
-	}
-	systemMetrics.append("pktUp", t, float64(status.NetIO.PktUp))
-	systemMetrics.append("pktDown", t, float64(status.NetIO.PktDown))
-	systemMetrics.append("tcpCount", t, float64(status.TcpCount))
-	systemMetrics.append("udpCount", t, float64(status.UdpCount))
-	online := 0
-	if p != nil && p.IsRunning() {
-		online = len(p.GetOnlineClients())
-	}
-	systemMetrics.append("online", t, float64(online))
-	if len(status.Loads) >= 3 {
-		systemMetrics.append("load1", t, status.Loads[0])
-		systemMetrics.append("load5", t, status.Loads[1])
-		systemMetrics.append("load15", t, status.Loads[2])
-	}
-}
-
-func (s *ServerService) sampleCPUUtilization() (float64, error) {
-	// Try native platform-specific CPU implementation first (Windows, Linux, macOS)
-	if pct, err := sys.CPUPercentRaw(); err == nil {
-		s.mu.Lock()
-		// First call to native method returns 0 (initializes baseline)
-		if !s.hasNativeCPUSample {
-			s.hasNativeCPUSample = true
-			s.mu.Unlock()
-			return 0, nil
-		}
-		// Smooth with EMA
-		const alpha = 0.3
-		if s.emaCPU == 0 {
-			s.emaCPU = pct
-		} else {
-			s.emaCPU = alpha*pct + (1-alpha)*s.emaCPU
-		}
-		val := s.emaCPU
-		s.mu.Unlock()
-		return val, nil
-	}
-	// If native call fails, fall back to gopsutil times
-	// Read aggregate CPU times (all CPUs combined)
-	times, err := cpu.Times(false)
-	if err != nil {
-		return 0, err
-	}
-	if len(times) == 0 {
-		return 0, fmt.Errorf("no cpu times available")
-	}
-
-	cur := times[0]
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// If this is the first sample, initialize and return current EMA (0 by default)
-	if !s.hasLastCPUSample {
-		s.lastCPUTimes = cur
-		s.hasLastCPUSample = true
-		return s.emaCPU, nil
-	}
-
-	// Compute busy and total deltas
-	// Note: Guest and GuestNice times are already included in User and Nice respectively,
-	// so we exclude them to avoid double-counting (Linux kernel accounting)
-	idleDelta := cur.Idle - s.lastCPUTimes.Idle
-	busyDelta := (cur.User - s.lastCPUTimes.User) +
-		(cur.System - s.lastCPUTimes.System) +
-		(cur.Nice - s.lastCPUTimes.Nice) +
-		(cur.Iowait - s.lastCPUTimes.Iowait) +
-		(cur.Irq - s.lastCPUTimes.Irq) +
-		(cur.Softirq - s.lastCPUTimes.Softirq) +
-		(cur.Steal - s.lastCPUTimes.Steal)
-
-	totalDelta := busyDelta + idleDelta
-
-	// Update last sample for next time
-	s.lastCPUTimes = cur
-
-	// Guard against division by zero or negative deltas (e.g., counter resets)
-	if totalDelta <= 0 {
-		return s.emaCPU, nil
-	}
-
-	raw := 100.0 * (busyDelta / totalDelta)
-	if raw < 0 {
-		raw = 0
-	}
-	if raw > 100 {
-		raw = 100
-	}
-
-	// Exponential moving average to smooth spikes
-	const alpha = 0.3 // smoothing factor (0<alpha<=1). Higher = more responsive, lower = smoother
-	if s.emaCPU == 0 {
-		// Initialize EMA with the first real reading to avoid long warm-up from zero
-		s.emaCPU = raw
-	} else {
-		s.emaCPU = alpha*raw + (1-alpha)*s.emaCPU
-	}
-
-	return s.emaCPU, nil
 }
 
 const (
@@ -1243,34 +756,6 @@ func (s *ServerService) GetXrayLogs(
 	return entries
 }
 
-// isVirtualInterface returns true for loopback and virtual/tunnel interfaces
-// that should be excluded from network traffic statistics.
-func isVirtualInterface(name string) bool {
-	// Exact matches
-	if name == "lo" || name == "lo0" {
-		return true
-	}
-	// Prefix matches for virtual/tunnel interfaces
-	virtualPrefixes := []string{
-		"loopback",
-		"docker",
-		"br-",
-		"veth",
-		"virbr",
-		"tun",
-		"tap",
-		"wg",
-		"tailscale",
-		"zt",
-	}
-	for _, prefix := range virtualPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func logEntryContains(line string, suffixes []string) bool {
 	for _, sfx := range suffixes {
 		if strings.Contains(line, sfx+"]") {
@@ -1324,17 +809,6 @@ func (s *ServerService) GetDb() ([]byte, error) {
 	return fileContents, nil
 }
 
-// BackupFilename returns the filename for a database backup, named after the
-// panel's address so a downloaded or Telegram-sent backup identifies the server
-// it came from, followed by the current date and time (_YYYY-MM-DD_HHMMSS) so
-// files accumulated in Telegram chat history group by server then sort
-// chronologically and same-day backups stay distinct. requestHost is the
-// browser's address: the getDb handler passes c.Request.Host so a panel download
-// is named after whatever address the user reached the panel with, no Listen
-// Domain needed. The Telegram bot has no request and passes "", falling back to
-// the configured Listen Domain (webDomain) and then the public IP. The extension
-// is .dump on PostgreSQL and .db on SQLite; the base falls back to "x-ui" when
-// no address is known.
 func (s *ServerService) BackupFilename(requestHost string) string {
 	ext := ".db"
 	if database.IsPostgres() {
@@ -1343,20 +817,10 @@ func (s *ServerService) BackupFilename(requestHost string) string {
 	return s.backupHost(requestHost) + backupDateSuffix(time.Now()) + ext
 }
 
-// backupDateSuffix returns the _YYYY-MM-DD_HHMMSS chronological suffix appended
-// after the host in backup filenames. Uses server-local time for consistency
-// with the timestamp printed in the Telegram backup message body.
 func backupDateSuffix(now time.Time) string {
 	return "_" + now.Format("2006-01-02_150405")
 }
 
-// backupHost picks the address used to name backup files: the browser's request
-// host (port stripped) when available, otherwise the configured Listen Domain
-// (webDomain) and then the resolved public IP (IPv4 before IPv6), reduced to safe
-// filename characters. The public IP is resolved directly rather than read from
-// LastStatus so callers whose ServerService never runs the status ticker —
-// notably the Telegram bot — still get a real address instead of the "x-ui"
-// fallback.
 func (s *ServerService) backupHost(requestHost string) string {
 	host := extractHostname(strings.TrimSpace(requestHost))
 	if host == "" {

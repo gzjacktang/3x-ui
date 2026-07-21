@@ -854,17 +854,6 @@ type ClientRecord struct {
 
 func (ClientRecord) TableName() string { return "clients" }
 
-type ClientGroup struct {
-	Id        int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name      string `json:"name" gorm:"uniqueIndex;not null"`
-	ResetUp   int64  `json:"resetUp" gorm:"column:reset_up;default:0"`
-	ResetDown int64  `json:"resetDown" gorm:"column:reset_down;default:0"`
-	CreatedAt int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
-	UpdatedAt int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
-}
-
-func (ClientGroup) TableName() string { return "client_groups" }
-
 // MarshalJSON emits the reverse column as a nested JSON object rather than an
 // escaped JSON-text string, matching the same convention Inbound uses for its
 // JSON-text columns. Empty storage renders as null.
@@ -872,9 +861,15 @@ func (r ClientRecord) MarshalJSON() ([]byte, error) {
 	type alias ClientRecord
 	return json.Marshal(struct {
 		alias
+		SubID   string          `json:"-"`
+		TgID    int64           `json:"-"`
+		Group   string          `json:"-"`
 		Reverse json.RawMessage `json:"reverse"`
 	}{
 		alias:   alias(r),
+		SubID:   r.SubID,
+		TgID:    r.TgID,
+		Group:   r.Group,
 		Reverse: jsonStringFieldToRaw(r.Reverse),
 	})
 }
@@ -905,13 +900,6 @@ type ClientInbound struct {
 
 func (ClientInbound) TableName() string { return "client_inbounds" }
 
-// ClientExternalLink is a per-client entry surfaced in the client's
-// subscription. Two kinds:
-//   - "link": a single third-party share link (vless://, vmess://, trojan://,
-//     ss://, hysteria2://, wireguard://). Emitted verbatim in raw subs; parsed
-//     into an outbound/proxy for JSON and Clash.
-//   - "subscription": a remote subscription URL. The panel fetches it (cached),
-//     decodes its links, and merges them into the client's subscription.
 type ClientExternalLink struct {
 	Id        int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	ClientId  int    `json:"clientId" gorm:"index;column:client_id"`
@@ -924,11 +912,7 @@ type ClientExternalLink struct {
 
 func (ClientExternalLink) TableName() string { return "client_external_links" }
 
-// External link kinds.
-const (
-	ExternalLinkKindLink         = "link"
-	ExternalLinkKindSubscription = "subscription"
-)
+const ExternalLinkKindLink = "link"
 
 type InboundFallback struct {
 	Id        int    `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -943,57 +927,6 @@ type InboundFallback struct {
 }
 
 func (InboundFallback) TableName() string { return "inbound_fallbacks" }
-
-type Host struct {
-	Id                int      `json:"id" form:"id" gorm:"primaryKey;autoIncrement" example:"1"`
-	GroupId           string   `json:"groupId" form:"groupId" gorm:"column:group_id;index"`
-	InboundId         int      `json:"inboundId" form:"inboundId" gorm:"index;not null;column:inbound_id" validate:"required" example:"1"`
-	SortOrder         int      `json:"sortOrder" form:"sortOrder" gorm:"default:0;column:sort_order"`
-	Remark            string   `json:"remark" form:"remark" validate:"required,max=256" example:"cdn-front"`
-	ServerDescription string   `json:"serverDescription" form:"serverDescription" gorm:"column:server_description" validate:"omitempty,max=64"`
-	IsDisabled        bool     `json:"isDisabled" form:"isDisabled" gorm:"default:false;column:is_disabled"`
-	IsHidden          bool     `json:"isHidden" form:"isHidden" gorm:"default:false;column:is_hidden"`
-	Tags              []string `json:"tags" form:"tags" gorm:"serializer:json"`
-
-	Address string `json:"address" form:"address" example:"cdn.example.com"`
-	Port    int    `json:"port" form:"port" gorm:"default:0" validate:"gte=0,lte=65535" example:"8443"`
-
-	Security               string   `json:"security" form:"security" gorm:"default:same" validate:"omitempty,oneof=same tls none reality" example:"same"`
-	Sni                    string   `json:"sni" form:"sni"`
-	HostHeader             string   `json:"hostHeader" form:"hostHeader" gorm:"column:host_header"`
-	Path                   string   `json:"path" form:"path"`
-	Alpn                   []string `json:"alpn" form:"alpn" gorm:"serializer:json"`
-	Fingerprint            string   `json:"fingerprint" form:"fingerprint"`
-	OverrideSniFromAddress bool     `json:"overrideSniFromAddress" form:"overrideSniFromAddress" gorm:"column:override_sni_from_address"`
-	KeepSniBlank           bool     `json:"keepSniBlank" form:"keepSniBlank" gorm:"column:keep_sni_blank"`
-	PinnedPeerCertSha256   []string `json:"pinnedPeerCertSha256" form:"pinnedPeerCertSha256" gorm:"serializer:json;column:pinned_peer_cert_sha256"`
-	VerifyPeerCertByName   string   `json:"verifyPeerCertByName" form:"verifyPeerCertByName" gorm:"column:verify_peer_cert_by_name"`
-	AllowInsecure          bool     `json:"allowInsecure" form:"allowInsecure" gorm:"column:allow_insecure"`
-	EchConfigList          string   `json:"echConfigList" form:"echConfigList" gorm:"column:ech_config_list"`
-
-	MuxParams     string `json:"muxParams" form:"muxParams" gorm:"type:text;column:mux_params"`
-	SockoptParams string `json:"sockoptParams" form:"sockoptParams" gorm:"type:text;column:sockopt_params"`
-	// FinalMask is a JSON object of xray finalmask masks (tcp/udp/quicParams),
-	// merged into this host's JSON-subscription stream. Empty = no override.
-	FinalMask string `json:"finalMask" form:"finalMask" gorm:"type:text;column:final_mask"`
-
-	// Single VLESS route value (0-65535) baked into the subscription UUID's 3rd
-	// group (bytes 6-7), which xray reads via net.PortFromBytes(id[6:8]). Empty = none.
-	VlessRoute string `json:"vlessRoute" form:"vlessRoute" gorm:"column:vless_route" example:"443"`
-
-	ExcludeFromSubTypes []string `json:"excludeFromSubTypes" form:"excludeFromSubTypes" gorm:"serializer:json;column:exclude_from_sub_types"`
-
-	MihomoIpVersion string `json:"mihomoIpVersion" form:"mihomoIpVersion" gorm:"column:mihomo_ip_version" validate:"omitempty,oneof=dual ipv4 ipv6 ipv4-prefer ipv6-prefer"`
-	MihomoX25519    bool   `json:"mihomoX25519" form:"mihomoX25519" gorm:"column:mihomo_x25519"`
-	ShuffleHost     bool   `json:"shuffleHost" form:"shuffleHost" gorm:"column:shuffle_host"`
-
-	NodeGuids []string `json:"nodeGuids,omitempty" form:"nodeGuids" gorm:"serializer:json;column:node_guids"`
-
-	CreatedAt int64 `json:"createdAt" gorm:"autoCreateTime:milli"`
-	UpdatedAt int64 `json:"updatedAt" gorm:"autoUpdateTime:milli"`
-}
-
-func (Host) TableName() string { return "hosts" }
 
 func (c *Client) ToRecord() *ClientRecord {
 	rec := &ClientRecord{
@@ -1090,25 +1023,6 @@ type ClientMergeConflict struct {
 	Old   any
 	New   any
 	Kept  any
-}
-
-type OutboundSubscription struct {
-	Id                   int    `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
-	Remark               string `json:"remark" form:"remark"`
-	Url                  string `json:"url" form:"url"`
-	Enabled              bool   `json:"enabled" form:"enabled" gorm:"default:true"`
-	AllowPrivate         bool   `json:"allowPrivate" form:"allowPrivate" gorm:"default:false"`
-	TagPrefix            string `json:"tagPrefix" form:"tagPrefix"`
-	UpdateInterval       int    `json:"updateInterval" form:"updateInterval" gorm:"default:600"` // seconds between refreshes
-	Priority             int    `json:"priority" form:"priority" gorm:"default:0"`               // order among subscriptions in the merged outbounds (lower = earlier)
-	Prepend              bool   `json:"prepend" form:"prepend" gorm:"default:false"`             // place this subscription's outbounds before the manual template outbounds
-	LastUpdated          int64  `json:"lastUpdated" form:"lastUpdated"`
-	LastError            string `json:"lastError" form:"lastError"`
-	LastFetchedOutbounds string `json:"lastFetchedOutbounds" form:"lastFetchedOutbounds" gorm:"type:text"`
-	LinkIdentities       string `json:"-" gorm:"type:text;column:link_identities"`
-	CreatedAt            int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
-	UpdatedAt            int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
-	OutboundCount        int    `json:"outboundCount" gorm:"-"`
 }
 
 func MergeClientRecord(existing *ClientRecord, incoming *ClientRecord) []ClientMergeConflict {

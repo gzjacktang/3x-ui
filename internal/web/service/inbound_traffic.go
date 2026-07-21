@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/runtime"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
 	"gorm.io/gorm"
@@ -477,9 +475,6 @@ func (s *InboundService) UpdateClientStat(tx *gorm.DB, email string, client *mod
 }
 
 func (s *InboundService) DelClientStat(tx *gorm.DB, email string) error {
-	if err := adjustGroupBaselinesForRemovedTraffic(tx, []string{email}); err != nil {
-		return err
-	}
 	if err := tx.Where("email = ?", email).Delete(xray.ClientTraffic{}).Error; err != nil {
 		return err
 	}
@@ -490,9 +485,6 @@ func (s *InboundService) DelClientStat(tx *gorm.DB, email string) error {
 }
 
 func (s *InboundService) delClientStatsByEmails(tx *gorm.DB, emails []string) error {
-	if err := adjustGroupBaselinesForRemovedTraffic(tx, emails); err != nil {
-		return err
-	}
 	const chunk = 400
 	for start := 0; start < len(emails); start += chunk {
 		end := min(start+chunk, len(emails))
@@ -513,9 +505,6 @@ func (s *InboundService) delClientStatsByEmails(tx *gorm.DB, emails []string) er
 func (s *InboundService) ResetClientTrafficByEmail(clientEmail string) error {
 	err := submitTrafficWrite(func() error {
 		return database.GetDB().Transaction(func(tx *gorm.DB) error {
-			if err := adjustGroupBaselinesForRemovedTraffic(tx, []string{clientEmail}); err != nil {
-				return err
-			}
 			if err := clearGlobalTraffic(tx, clientEmail); err != nil {
 				return err
 			}
@@ -616,9 +605,6 @@ func (s *InboundService) resetClientTrafficLocked(id int, clientEmail string) (b
 		return false, err
 	}
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := adjustGroupBaselinesForRemovedTraffic(tx, []string{clientEmail}); err != nil {
-			return err
-		}
 		if err := tx.Save(traffic).Error; err != nil {
 			return err
 		}
@@ -659,7 +645,6 @@ func (s *InboundService) ResetAllTraffics() error {
 		return s.resetAllTrafficsLocked()
 	})
 	if err == nil {
-		s.propagateResetAllTrafficsToNodes()
 		s.resetAllMtprotoQuotas()
 	}
 	return err
@@ -676,24 +661,6 @@ func (s *InboundService) resetAllTrafficsLocked() error {
 			"down":                    0,
 			"last_traffic_reset_time": now,
 		}).Error
-}
-
-// propagateResetAllTrafficsToNodes tells every node to zero its own counters.
-// Kept OUT of the traffic-writer transaction: each remote call can block up to
-// remoteHTTPTimeout, and holding the single serial writer across N such calls
-// stalls traffic accounting and drops the deltas of every concurrent poll.
-func (s *InboundService) propagateResetAllTrafficsToNodes() {
-	nodes, err := (&NodeService{}).GetAll()
-	if err != nil {
-		return
-	}
-	for _, node := range nodes {
-		if rt, err := runtime.GetManager().RuntimeFor(&node.Id); err == nil {
-			if e := rt.ResetAllTraffics(context.Background()); e != nil {
-				logger.Warning("ResetAllTraffics: remote propagation to", rt.Name(), "failed:", e)
-			}
-		}
-	}
 }
 
 func (s *InboundService) ResetInboundTraffic(id int) error {
@@ -851,75 +818,6 @@ func (s *InboundService) DelDepletedClients(id int) (err error) {
 		}
 	}
 	return nil
-}
-
-func (s *InboundService) GetClientTrafficTgBot(tgId int64) ([]*xray.ClientTraffic, error) {
-	db := database.GetDB()
-
-	idQuery := fmt.Sprintf(
-		"SELECT DISTINCT inbounds.id %s WHERE %s = ?",
-		database.JSONClientsFromInbound(),
-		database.JSONFieldText("client.value", "tgId"),
-	)
-	var inboundIds []int
-	if err := db.Raw(idQuery, strconv.FormatInt(tgId, 10)).Scan(&inboundIds).Error; err != nil {
-		logger.Errorf("Error retrieving inbounds with tgId %d: %v", tgId, err)
-		return nil, err
-	}
-
-	var inbounds []*model.Inbound
-	if len(inboundIds) > 0 {
-		err := db.Model(model.Inbound{}).Where("id IN ?", inboundIds).Find(&inbounds).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			logger.Errorf("Error retrieving inbounds with tgId %d: %v", tgId, err)
-			return nil, err
-		}
-	}
-
-	var emails []string
-	for _, inbound := range inbounds {
-		clients, err := s.GetClients(inbound)
-		if err != nil {
-			logger.Errorf("Error retrieving clients for inbound %d: %v", inbound.Id, err)
-			continue
-		}
-		for _, client := range clients {
-			if client.TgID == tgId {
-				emails = append(emails, client.Email)
-			}
-		}
-	}
-
-	// Chunked to stay under SQLite's bind-variable limit when a single Telegram
-	// account owns thousands of clients across inbounds.
-	uniqEmails := uniqueNonEmptyStrings(emails)
-	traffics := make([]*xray.ClientTraffic, 0, len(uniqEmails))
-	for _, batch := range chunkStrings(uniqEmails, sqliteMaxVars) {
-		var page []*xray.ClientTraffic
-		if err := db.Model(xray.ClientTraffic{}).Where("email IN ?", batch).Find(&page).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				continue
-			}
-			logger.Errorf("Error retrieving ClientTraffic for emails %v: %v", batch, err)
-			return nil, err
-		}
-		traffics = append(traffics, page...)
-	}
-	if len(traffics) == 0 {
-		logger.Warning("No ClientTraffic records found for emails:", emails)
-		return nil, nil
-	}
-
-	// Populate UUID and other client data for each traffic record
-	for i := range traffics {
-		if ct, client, e := s.GetClientByEmail(traffics[i].Email); e == nil && ct != nil && client != nil {
-			traffics[i].Enable = client.Enable
-			traffics[i].UUID = client.ID
-			traffics[i].SubId = client.SubID
-		}
-	}
-
-	return traffics, nil
 }
 
 // BumpClientsLastOnline sets client_traffics.last_online to now for the given

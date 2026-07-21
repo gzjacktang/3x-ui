@@ -24,7 +24,7 @@ gen: ## Regenerate Zod schemas + OpenAPI from Go sources
 
 .PHONY: gen-check
 gen-check: gen ## Fail if generated files are stale
-	git diff --exit-code -- frontend/src/generated frontend/public/openapi.json
+	git diff --exit-code -- frontend/src/generated
 
 .PHONY: lint-go
 lint-go: dist-stub ## golangci-lint on Go sources

@@ -601,8 +601,6 @@ func (s *NodeService) Delete(id int) error {
 	if mgr := runtime.GetManager(); mgr != nil {
 		mgr.InvalidateNode(id)
 	}
-	nodeMetrics.drop(nodeMetricKey(id, "cpu"))
-	nodeMetrics.drop(nodeMetricKey(id, "mem"))
 	return nil
 }
 
@@ -717,13 +715,6 @@ func (s *NodeService) UpdateHeartbeat(id int, p HeartbeatPatch) error {
 	if err := db.Model(model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return err
 	}
-	if p.Status == "online" {
-		now := time.Unix(p.LastHeartbeat, 0)
-		nodeMetrics.append(nodeMetricKey(id, "cpu"), now, p.CpuPct)
-		nodeMetrics.append(nodeMetricKey(id, "mem"), now, p.MemPct)
-		nodeMetrics.append(nodeMetricKey(id, "netUp"), now, float64(p.NetUp))
-		nodeMetrics.append(nodeMetricKey(id, "netDown"), now, float64(p.NetDown))
-	}
 	return nil
 }
 
@@ -816,14 +807,6 @@ func (s *NodeService) IsNodePending(id int) bool {
 		return false
 	}
 	return !enabled || status != "online"
-}
-
-func nodeMetricKey(id int, metric string) string {
-	return "node:" + strconv.Itoa(id) + ":" + metric
-}
-
-func (s *NodeService) AggregateNodeMetric(id int, metric string, bucketSeconds int, maxPoints int) []map[string]any {
-	return nodeMetrics.aggregate(nodeMetricKey(id, metric), bucketSeconds, maxPoints)
 }
 
 func (s *NodeService) Probe(ctx context.Context, n *model.Node) (HeartbeatPatch, error) {

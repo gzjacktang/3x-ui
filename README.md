@@ -16,7 +16,7 @@
   <a href="https://pkg.go.dev/github.com/mhsanaei/3x-ui/v3"><img src="https://pkg.go.dev/badge/github.com/mhsanaei/3x-ui/v3.svg" alt="Go Reference"></a>
 </p>
 
-**3X-UI** is an advanced, open-source web control panel for managing [Xray-core](https://github.com/XTLS/Xray-core) servers. It provides a clean, multi-language interface for deploying, configuring, and monitoring a wide range of proxy and VPN protocols — from a single VPS to multi-node deployments.
+**3X-UI Lite** is a low-memory web control panel for managing [Xray-core](https://github.com/XTLS/Xray-core) on a single server. It keeps the inbound, client, outbound, routing, DNS, balancer, and security workflows while removing monitoring and integration services that are unnecessary on a small VPS.
 
 Built as an enhanced fork of the original X-UI project, 3X-UI adds broader protocol support, improved stability, per-client traffic accounting, and many quality-of-life features.
 
@@ -28,15 +28,12 @@ Built as an enhanced fork of the original X-UI project, 3X-UI adds broader proto
 - **Multi-protocol inbounds** — VLESS, VMess, Trojan, Shadowsocks, WireGuard, Hysteria2, HTTP, SOCKS (Mixed), Dokodemo-door / Tunnel, and TUN.
 - **Modern transports & security** — TCP (Raw), mKCP, WebSocket, gRPC, HTTPUpgrade, and XHTTP, secured with TLS, XTLS, and REALITY.
 - **Fallbacks** — serve multiple protocols on a single port (e.g. VLESS and Trojan on 443) using Xray's fallback support.
-- **Per-client management** — traffic quotas, expiry dates, IP limits, live online status, and one-click share links, QR codes, and subscriptions.
+- **Per-client management** — traffic quotas, expiry dates, IP limits, live online status, and one-click share links and QR codes.
 - **Traffic statistics** — per inbound, per client, and per outbound, with reset controls.
-- **Multi-node support** — manage and scale across multiple servers from a single panel.
 - **Outbound & routing** — WARP, NordVPN, custom routing rules, load balancers, and outbound proxy chaining.
-- **Built-in subscription server** with multiple output formats and [custom page templates](docs/custom-subscription-templates.md).
-- **Telegram bot** for remote monitoring and management.
-- **RESTful API** with in-panel Swagger documentation.
+- **Authenticated panel API** for retained administration workflows.
 - **Flexible storage** — SQLite (default) or PostgreSQL.
-- **13 UI languages** with dark and light themes.
+- **English and Simplified Chinese UI** with dark and light themes.
 - **Fail2ban integration** for enforcing per-client IP limits.
 
 ## Screenshots
@@ -57,11 +54,6 @@ Built as an enhanced fork of the original X-UI project, 3X-UI adds broader proto
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./media/03-add-client-dark.png">
   <img alt="Add client" src="./media/03-add-client-light.png">
-</picture>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./media/05-add-nodes-dark.png">
-  <img alt="Configs" src="./media/05-add-nodes-light.png">
 </picture>
 
 </details>
@@ -109,7 +101,7 @@ zero prompts, generating random credentials and writing them to
 3X-UI supports two backends, chosen during the install:
 
 - **SQLite** (default) — a single file at `/etc/x-ui/x-ui.db`. Zero setup, ideal for small and medium deployments.
-- **PostgreSQL** — recommended for high client counts or multi-node setups. The installer can install PostgreSQL locally for you, or accept a DSN to an existing server.
+- **PostgreSQL** — recommended for high client counts. The installer can install PostgreSQL locally for you, or accept a DSN to an existing server.
 
 At runtime the backend is selected via environment variables (the installer writes these to `/etc/default/x-ui` for you):
 

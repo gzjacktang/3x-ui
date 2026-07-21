@@ -3,7 +3,6 @@ import { Modal, Tag } from 'antd';
 
 import { SizeFormatter, IntlUtil, ColorUtils } from '@/utils';
 import { InfinityIcon } from '@/components/ui';
-import type { NodeRecord } from '@/api/queries/useNodesQuery';
 
 import {
   readStreamHints,
@@ -19,8 +18,6 @@ import type { ClientCountEntry, DBInboundRecord, InboundSpeedEntry } from './typ
 interface InboundStatsModalProps {
   open: boolean;
   record: DBInboundRecord | null;
-  hasActiveNode: boolean;
-  nodesById: Map<number, NodeRecord>;
   clientCount: Record<number, ClientCountEntry>;
   inboundSpeed: Record<number, InboundSpeedEntry>;
   trafficDiff: number;
@@ -31,8 +28,6 @@ interface InboundStatsModalProps {
 export default function InboundStatsModal({
   open,
   record,
-  hasActiveNode,
-  nodesById,
   clientCount,
   inboundSpeed,
   trafficDiff,
@@ -90,20 +85,6 @@ export default function InboundStatsModal({
             <span className="stat-label">{t('pages.inbounds.port')}</span>
             <Tag>{record.port}</Tag>
           </div>
-          {hasActiveNode && (
-            <div className="stat-row">
-              <span className="stat-label">{t('pages.inbounds.node')}</span>
-              {record.nodeId == null ? (
-                <Tag color="default">{t('pages.inbounds.localPanel')}</Tag>
-              ) : nodesById.get(record.nodeId) ? (
-                <Tag color={nodesById.get(record.nodeId)!.status === 'online' ? 'blue' : 'red'}>
-                  {nodesById.get(record.nodeId)!.name}
-                </Tag>
-              ) : (
-                <Tag color="orange">#{record.nodeId}</Tag>
-              )}
-            </div>
-          )}
           <div className="stat-row">
             <span className="stat-label">{t('pages.inbounds.traffic')}</span>
             <Tag color={ColorUtils.usageColor(record.up + record.down, trafficDiff, record.total)}>

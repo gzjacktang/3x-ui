@@ -49,8 +49,6 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.GET("/list/paged", a.listPaged)
 	g.GET("/get/:email", a.get)
 	g.GET("/traffic/:email", a.getTrafficByEmail)
-	g.GET("/subLinks/:subId", a.getSubLinks)
-	g.GET("/links/:email", a.getClientLinks)
 
 	g.POST("/add", a.create)
 	g.POST("/update/:email", a.update)
@@ -532,24 +530,6 @@ func (a *ClientController) getTrafficByEmail(c *gin.Context) {
 		return
 	}
 	jsonObj(c, traffic, nil)
-}
-
-func (a *ClientController) getSubLinks(c *gin.Context) {
-	links, err := a.inboundService.GetSubLinks(resolveHost(c), c.Param("subId"))
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
-		return
-	}
-	jsonObj(c, links, nil)
-}
-
-func (a *ClientController) getClientLinks(c *gin.Context) {
-	links, err := a.inboundService.GetAllClientLinks(resolveHost(c), c.Param("email"))
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
-		return
-	}
-	jsonObj(c, links, nil)
 }
 
 func (a *ClientController) detach(c *gin.Context) {

@@ -182,7 +182,7 @@ func TestMigrateData_FailedCopyLeavesDestinationUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen broken source: %v", err)
 	}
-	if err := breaker.Exec("DROP TABLE outbound_subscriptions").Error; err != nil {
+	if err := breaker.Exec("DROP TABLE api_tokens").Error; err != nil {
 		t.Fatalf("drop table from broken source: %v", err)
 	}
 	if sqlDB, err := breaker.DB(); err == nil {
@@ -190,7 +190,7 @@ func TestMigrateData_FailedCopyLeavesDestinationUntouched(t *testing.T) {
 	}
 
 	if err := MigrateData(brokenSrc, dsn); err == nil {
-		t.Fatal("MigrateData succeeded on a source missing outbound_subscriptions, want error")
+		t.Fatal("MigrateData succeeded on a source missing api_tokens, want error")
 	}
 
 	var keepMe, evil int64

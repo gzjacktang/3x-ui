@@ -64,7 +64,6 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.GET("/list", a.getInbounds)
 	g.GET("/list/slim", a.getInboundsSlim)
 	g.GET("/options", a.getInboundOptions)
-	g.GET("/allLinks", a.getAllInboundLinks)
 	g.GET("/get/:id", a.getInbound)
 	g.GET("/:id/fallbacks", a.getFallbacks)
 
@@ -104,19 +103,6 @@ func (a *InboundController) getInboundsSlim(c *gin.Context) {
 	jsonObj(c, inbounds, nil)
 }
 
-// getAllInboundLinks returns every inbound's share links across all clients,
-// rendered through the same subscription engine the client pages use so the
-// remark template (name-only display part) is applied consistently.
-func (a *InboundController) getAllInboundLinks(c *gin.Context) {
-	user := session.GetLoginUser(c)
-	links, err := a.inboundService.GetAllInboundLinks(resolveHost(c), user.Id)
-	if err != nil {
-		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.obtain"), err)
-		return
-	}
-	jsonObj(c, links, nil)
-}
-
 // getInboundOptions returns a lightweight projection of the user's inbounds
 // (id, remark, protocol, port, tlsFlowCapable) for pickers in the clients UI.
 // Avoids shipping per-client settings and traffic stats just to fill a dropdown.
@@ -153,13 +139,7 @@ func (a *InboundController) addInbound(c *gin.Context) {
 	}
 	user := session.GetLoginUser(c)
 	inbound.UserId = user.Id
-	// Treat NodeID=0 as "no node" — gin's *int form binding can land on
-	// 0 when the field is absent or empty, and 0 is never a valid Node
-	// row id. Without this normalization the runtime layer would try to
-	// load Node id=0 and surface "record not found".
-	if inbound.NodeID != nil && *inbound.NodeID == 0 {
-		inbound.NodeID = nil
-	}
+	inbound.NodeID = nil
 
 	inbound, needRestart, err := a.inboundService.AddInbound(inbound)
 	if err != nil {
@@ -234,13 +214,7 @@ func (a *InboundController) updateInbound(c *gin.Context) {
 	if !middleware.BindAndValidateInto(c, inbound) {
 		return
 	}
-	// Same NodeID=0 → nil normalisation as addInbound. UpdateInbound
-	// loads the existing row's NodeID from DB anyway (Phase 1 doesn't
-	// support migrating an inbound between nodes), but normalising here
-	// keeps the wire shape consistent.
-	if inbound.NodeID != nil && *inbound.NodeID == 0 {
-		inbound.NodeID = nil
-	}
+	inbound.NodeID = nil
 	inbound, needRestart, err := a.inboundService.UpdateInbound(inbound)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
@@ -383,17 +357,7 @@ func (a *InboundController) importInbound(c *gin.Context) {
 	user := session.GetLoginUser(c)
 	inbound.Id = 0
 	inbound.UserId = user.Id
-	// Node IDs are panel-local and not portable across panels. Drop a node
-	// reference that is zero or that points to a node which doesn't exist on
-	// this panel, so a cross-panel export imports as a local inbound instead of
-	// failing with "record not found" when nodePushPlan looks the node up.
-	if inbound.NodeID != nil {
-		if *inbound.NodeID == 0 {
-			inbound.NodeID = nil
-		} else if exists, err := (&service.NodeService{}).NodeExists(*inbound.NodeID); err == nil && !exists {
-			inbound.NodeID = nil
-		}
-	}
+	inbound.NodeID = nil
 
 	for index := range inbound.ClientStats {
 		inbound.ClientStats[index].Id = 0

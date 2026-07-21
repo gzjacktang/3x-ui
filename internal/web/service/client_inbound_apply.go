@@ -261,7 +261,7 @@ func (s *ClientService) checkEmailsExistForClients(inboundSvc *InboundService, c
 		}
 		seen[key] = client.SubID
 		if existingSub, ok := emailSubIDs[key]; ok {
-			if client.SubID == "" || existingSub == "" || existingSub != client.SubID {
+			if client.SubID != "" && existingSub != "" && existingSub != client.SubID {
 				return client.Email, nil
 			}
 		}
@@ -299,10 +299,6 @@ func (s *ClientService) addInboundClient(inboundSvc *InboundService, data *model
 				cm["created_at"] = nowTs
 			}
 			cm["updated_at"] = nowTs
-			existingSub, _ := cm["subId"].(string)
-			if strings.TrimSpace(existingSub) == "" {
-				cm["subId"] = random.NumLower(16)
-			}
 			interfaceClients[i] = cm
 		}
 	}
@@ -1060,59 +1056,6 @@ func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inbo
 	}
 
 	return needRestart, nil
-}
-
-func (s *ClientService) SetClientTelegramUserID(inboundSvc *InboundService, trafficId int, tgId int64) (bool, error) {
-	traffic, inbound, err := inboundSvc.GetClientInboundByTrafficID(trafficId)
-	if err != nil {
-		return false, err
-	}
-	if inbound == nil {
-		return false, common.NewError("Inbound Not Found For Traffic ID:", trafficId)
-	}
-
-	clientEmail := traffic.Email
-
-	oldClients, err := inboundSvc.GetClients(inbound)
-	if err != nil {
-		return false, err
-	}
-
-	found := false
-	for _, oldClient := range oldClients {
-		if oldClient.Email == clientEmail {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return false, common.NewError("Client Not Found For Email:", clientEmail)
-	}
-
-	var settings map[string]any
-	err = json.Unmarshal([]byte(inbound.Settings), &settings)
-	if err != nil {
-		return false, err
-	}
-	clients := settings["clients"].([]any)
-	var newClients []any
-	for client_index := range clients {
-		c := clients[client_index].(map[string]any)
-		if c["email"] == clientEmail {
-			c["tgId"] = tgId
-			c["updated_at"] = time.Now().Unix() * 1000
-			newClients = append(newClients, any(c))
-		}
-	}
-	settings["clients"] = newClients
-	modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return false, err
-	}
-	inbound.Settings = string(modifiedSettings)
-	needRestart, err := s.UpdateInboundClient(inboundSvc, inbound, clientEmail)
-	return needRestart, err
 }
 
 func (s *ClientService) CheckIsEnabledByEmail(inboundSvc *InboundService, clientEmail string) (bool, error) {

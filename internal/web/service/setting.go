@@ -34,10 +34,8 @@ import (
 var xrayTemplateConfig string
 
 const (
-	DefaultSubClashUserAgentRegex = `(?i)(clash|mihomo)`
-	DefaultSubJsonUserAgentRegex  = ``
-	DefaultRemarkTemplate         = "{{INBOUND}}-{{EMAIL}}|📊{{TRAFFIC_LEFT}}|⏳{{DAYS_LEFT}}D"
-	maxRegexLength                = 2048
+	DefaultRemarkTemplate = "{{INBOUND}}-{{EMAIL}}|📊{{TRAFFIC_LEFT}}|⏳{{DAYS_LEFT}}D"
+	maxRegexLength        = 2048
 )
 
 var defaultValueMap = map[string]string{
@@ -67,54 +65,8 @@ var defaultValueMap = map[string]string{
 	"trafficDiff":                 "0",
 	"remarkTemplate":              DefaultRemarkTemplate,
 	"timeLocation":                "Local",
-	"tgBotEnable":                 "false",
-	"tgBotToken":                  "",
-	"tgBotProxy":                  "",
-	"tgBotAPIServer":              "",
-	"tgBotChatId":                 "",
-	"tgRunTime":                   "@daily",
-	"tgBotBackup":                 "false",
-	"tgCpu":                       "80",
-	"tgMemory":                    "80",
-	"tgLang":                      "en-US",
 	"twoFactorEnable":             "false",
 	"twoFactorToken":              "",
-	"subEnable":                   "true",
-	"subJsonEnable":               "false",
-	"subJsonAutoDetect":           "false",
-	"subJsonAlwaysArray":          "false",
-	"subJsonUserAgentRegex":       "",
-	"subClashAutoDetect":          "false",
-	"subClashUserAgentRegex":      "",
-	"subTitle":                    "",
-	"subSupportUrl":               "",
-	"subProfileUrl":               "",
-	"subAnnounce":                 "",
-	"subEnableRouting":            "false",
-	"subRoutingRules":             "",
-	"subHideSettings":             "false",
-	"subIncyEnableRouting":        "false",
-	"subIncyRoutingRules":         "",
-	"subListen":                   "",
-	"subPort":                     "2096",
-	"subPath":                     "/sub/",
-	"subDomain":                   "",
-	"subCertFile":                 "",
-	"subKeyFile":                  "",
-	"subUpdates":                  "12",
-	"subEncrypt":                  "true",
-	"subURI":                      "",
-	"subJsonPath":                 "/json/",
-	"subJsonURI":                  "",
-	"subClashEnable":              "false",
-	"subClashPath":                "/clash/",
-	"subClashURI":                 "",
-	"subClashEnableRouting":       "false",
-	"subClashRules":               "",
-	"subJsonMux":                  "",
-	"subJsonRules":                "",
-	"subJsonFinalMask":            "",
-	"subThemeDir":                 "",
 	"datepicker":                  "gregorian",
 	"warp":                        "",
 	"warpUpdateInterval":          "0",
@@ -148,23 +100,6 @@ var defaultValueMap = map[string]string{
 	"ldapDefaultTotalGB":     "0",
 	"ldapDefaultExpiryDays":  "0",
 	"ldapDefaultLimitIP":     "0",
-
-	// Event bus — per-subscriber event filtering (empty = all disabled)
-	"tgEnabledEvents":   "login.attempt,cpu.high",
-	"smtpEnabledEvents": "login.attempt,cpu.high",
-	"smtpCpu":           "80",
-	"smtpMemory":        "80",
-
-	// Email (SMTP) notifications
-	"smtpEnable":         "false",
-	"smtpHost":           "",
-	"smtpPort":           "587",
-	"smtpUsername":       "",
-	"smtpPassword":       "",
-	"smtpFrom":           "",
-	"smtpFromName":       "",
-	"smtpTo":             "",
-	"smtpEncryptionType": "starttls", // no, starttls, tls
 }
 
 // SettingService provides business logic for application settings management.
@@ -261,20 +196,16 @@ func (s *SettingService) GetAllSettingView() (*entity.AllSettingView, error) {
 		return nil, err
 	}
 	view := &entity.AllSettingView{AllSetting: *allSetting}
-	view.HasTgBotToken = secretConfigured(allSetting.TgBotToken)
 	view.HasTwoFactorToken = secretConfigured(allSetting.TwoFactorToken)
 	view.HasLdapPassword = secretConfigured(allSetting.LdapPassword)
 	view.HasWarpSecret = secretConfigured(mustString(s.GetWarp()))
 	view.HasNordSecret = secretConfigured(mustString(s.GetNord()))
-	view.HasSmtpPassword = secretConfigured(allSetting.SmtpPassword)
 	var apiTokenCount int64
 	if err := database.GetDB().Model(model.ApiToken{}).Where("enabled = ?", true).Count(&apiTokenCount).Error; err == nil {
 		view.HasApiToken = apiTokenCount > 0
 	}
-	view.TgBotToken = ""
 	view.TwoFactorToken = ""
 	view.LdapPassword = ""
-	view.SmtpPassword = ""
 	return view, nil
 }
 
@@ -429,24 +360,6 @@ func (s *SettingService) GetWebDomain() (string, error) {
 	return s.getString("webDomain")
 }
 
-func (s *SettingService) GetTgBotToken() (string, error) {
-	return s.getString("tgBotToken")
-}
-
-func (s *SettingService) SetTgBotToken(token string) error {
-	return s.setString("tgBotToken", token)
-}
-
-func (s *SettingService) GetTgBotProxy() (string, error) {
-	return s.getString("tgBotProxy")
-}
-
-func (s *SettingService) SetTgBotProxy(token string) error {
-	return s.setString("tgBotProxy", token)
-}
-
-// GetPanelOutbound returns the Xray outbound tag the panel's own outbound
-// requests (version checks, Telegram, subscription fetches) are routed through.
 func (s *SettingService) GetPanelOutbound() (string, error) {
 	return s.getString("panelOutbound")
 }
@@ -482,26 +395,6 @@ func (s *SettingService) PanelEgressProxyURL() string {
 	return ""
 }
 
-func (s *SettingService) NodeEgressProxyURL(nodeID int) string {
-	tag := NodeEgressInboundTag(nodeID)
-	proc := XrayProcess()
-	if proc == nil || !proc.IsRunning() {
-		logger.Warning("node outbound [", tag, "] is set but Xray is not running, using a direct connection")
-		return ""
-	}
-	cfg := proc.GetConfig()
-	if cfg == nil {
-		return ""
-	}
-	for i := range cfg.InboundConfigs {
-		if cfg.InboundConfigs[i].Tag == tag {
-			return fmt.Sprintf("socks5://127.0.0.1:%d", cfg.InboundConfigs[i].Port)
-		}
-	}
-	logger.Warning("node outbound [", tag, "] is set but the egress bridge is not in the running config, using a direct connection")
-	return ""
-}
-
 // NewProxiedHTTPClient returns an HTTP client that routes the panel's own
 // outbound requests through the configured panel outbound (via the loopback
 // SOCKS bridge in the running Xray). When the feature is off or the bridge
@@ -514,58 +407,6 @@ func (s *SettingService) NewProxiedHTTPClient(timeout time.Duration) *http.Clien
 		return &http.Client{Timeout: timeout}
 	}
 	return client
-}
-
-func (s *SettingService) GetTgBotAPIServer() (string, error) {
-	return s.getString("tgBotAPIServer")
-}
-
-func (s *SettingService) SetTgBotAPIServer(token string) error {
-	return s.setString("tgBotAPIServer", token)
-}
-
-func (s *SettingService) GetTgBotChatId() (string, error) {
-	return s.getString("tgBotChatId")
-}
-
-func (s *SettingService) SetTgBotChatId(chatIds string) error {
-	return s.setString("tgBotChatId", chatIds)
-}
-
-func (s *SettingService) GetTgbotEnabled() (bool, error) {
-	return s.getBool("tgBotEnable")
-}
-
-func (s *SettingService) SetTgbotEnabled(value bool) error {
-	return s.setBool("tgBotEnable", value)
-}
-
-func (s *SettingService) GetTgbotRuntime() (string, error) {
-	return s.getString("tgRunTime")
-}
-
-func (s *SettingService) SetTgbotRuntime(time string) error {
-	return s.setString("tgRunTime", time)
-}
-
-func (s *SettingService) GetTgBotBackup() (bool, error) {
-	return s.getBool("tgBotBackup")
-}
-
-func (s *SettingService) GetTgCpu() (int, error) {
-	return s.getInt("tgCpu")
-}
-
-func (s *SettingService) GetTgMemory() (int, error) {
-	return s.getInt("tgMemory")
-}
-
-func (s *SettingService) SetTgMemory(value int) error {
-	return s.setInt("tgMemory", value)
-}
-
-func (s *SettingService) GetTgLang() (string, error) {
-	return s.getString("tgLang")
 }
 
 func (s *SettingService) GetTwoFactorEnable() (bool, error) {
@@ -712,162 +553,8 @@ func (s *SettingService) GetTimeLocation() (*time.Location, error) {
 	return location, nil
 }
 
-func (s *SettingService) GetSubEnable() (bool, error) {
-	return s.getBool("subEnable")
-}
-
-func (s *SettingService) GetSubJsonEnable() (bool, error) {
-	return s.getBool("subJsonEnable")
-}
-
-func (s *SettingService) GetSubJsonAutoDetect() (bool, error) {
-	return s.getBool("subJsonAutoDetect")
-}
-
-func (s *SettingService) GetSubJsonAlwaysArray() (bool, error) {
-	return s.getBool("subJsonAlwaysArray")
-}
-
-func (s *SettingService) GetSubJsonUserAgentRegex() (string, error) {
-	return s.getString("subJsonUserAgentRegex")
-}
-
-func (s *SettingService) GetSubClashAutoDetect() (bool, error) {
-	return s.getBool("subClashAutoDetect")
-}
-
-func (s *SettingService) GetSubClashUserAgentRegex() (string, error) {
-	return s.getString("subClashUserAgentRegex")
-}
-
-func (s *SettingService) GetSubTitle() (string, error) {
-	return s.getString("subTitle")
-}
-
-func (s *SettingService) GetSubSupportUrl() (string, error) {
-	value, err := s.getString("subSupportUrl")
-	return common.EnsureURLScheme(value), err
-}
-
-func (s *SettingService) GetSubProfileUrl() (string, error) {
-	value, err := s.getString("subProfileUrl")
-	return common.EnsureURLScheme(value), err
-}
-
-func (s *SettingService) GetSubAnnounce() (string, error) {
-	return s.getString("subAnnounce")
-}
-
-func (s *SettingService) GetSubEnableRouting() (bool, error) {
-	return s.getBool("subEnableRouting")
-}
-
-func (s *SettingService) GetSubRoutingRules() (string, error) {
-	return s.getString("subRoutingRules")
-}
-
-func (s *SettingService) GetSubHideSettings() (bool, error) {
-	return s.getBool("subHideSettings")
-}
-
-func (s *SettingService) GetSubIncyEnableRouting() (bool, error) {
-	return s.getBool("subIncyEnableRouting")
-}
-
-func (s *SettingService) GetSubIncyRoutingRules() (string, error) {
-	return s.getString("subIncyRoutingRules")
-}
-
-func (s *SettingService) GetSubListen() (string, error) {
-	return s.getString("subListen")
-}
-
-func (s *SettingService) GetSubPort() (int, error) {
-	return s.getInt("subPort")
-}
-
-func (s *SettingService) GetSubPath() (string, error) {
-	return s.getString("subPath")
-}
-
-func (s *SettingService) GetSubJsonPath() (string, error) {
-	return s.getString("subJsonPath")
-}
-
-func (s *SettingService) GetSubDomain() (string, error) {
-	return s.getString("subDomain")
-}
-
-func (s *SettingService) SetSubCertFile(subCertFile string) error {
-	return s.setString("subCertFile", subCertFile)
-}
-
-func (s *SettingService) GetSubCertFile() (string, error) {
-	return s.getString("subCertFile")
-}
-
-func (s *SettingService) SetSubKeyFile(subKeyFile string) error {
-	return s.setString("subKeyFile", subKeyFile)
-}
-
-func (s *SettingService) GetSubKeyFile() (string, error) {
-	return s.getString("subKeyFile")
-}
-
-func (s *SettingService) GetSubUpdates() (string, error) {
-	return s.getString("subUpdates")
-}
-
-func (s *SettingService) GetSubEncrypt() (bool, error) {
-	return s.getBool("subEncrypt")
-}
-
 func (s *SettingService) GetPageSize() (int, error) {
 	return s.getInt("pageSize")
-}
-
-func (s *SettingService) GetSubURI() (string, error) {
-	return s.getString("subURI")
-}
-
-func (s *SettingService) GetSubJsonURI() (string, error) {
-	return s.getString("subJsonURI")
-}
-
-func (s *SettingService) GetSubClashEnable() (bool, error) {
-	return s.getBool("subClashEnable")
-}
-
-func (s *SettingService) GetSubClashPath() (string, error) {
-	return s.getString("subClashPath")
-}
-
-func (s *SettingService) GetSubClashURI() (string, error) {
-	return s.getString("subClashURI")
-}
-
-func (s *SettingService) GetSubClashEnableRouting() (bool, error) {
-	return s.getBool("subClashEnableRouting")
-}
-
-func (s *SettingService) GetSubClashRules() (string, error) {
-	return s.getString("subClashRules")
-}
-
-func (s *SettingService) GetSubJsonMux() (string, error) {
-	return s.getString("subJsonMux")
-}
-
-func (s *SettingService) GetSubJsonRules() (string, error) {
-	return s.getString("subJsonRules")
-}
-
-func (s *SettingService) GetSubJsonFinalMask() (string, error) {
-	return s.getString("subJsonFinalMask")
-}
-
-func (s *SettingService) GetSubThemeDir() (string, error) {
-	return s.getString("subThemeDir")
 }
 
 func (s *SettingService) GetDatepicker() (string, error) {
@@ -1028,121 +715,11 @@ func (s *SettingService) GetLdapDefaultLimitIP() (int, error) {
 	return s.getInt("ldapDefaultLimitIP")
 }
 
-// Event bus — per-subscriber event filtering
-
-func (s *SettingService) GetTgEnabledEvents() (string, error) {
-	return s.getString("tgEnabledEvents")
-}
-
-func (s *SettingService) SetTgEnabledEvents(events string) error {
-	return s.setString("tgEnabledEvents", events)
-}
-
-func (s *SettingService) GetSmtpEnabledEvents() (string, error) {
-	return s.getString("smtpEnabledEvents")
-}
-
-func (s *SettingService) SetSmtpEnabledEvents(events string) error {
-	return s.setString("smtpEnabledEvents", events)
-}
-
-// Email (SMTP) settings
-
-func (s *SettingService) GetSmtpEnable() (bool, error) {
-	return s.getBool("smtpEnable")
-}
-
-func (s *SettingService) SetSmtpEnable(value bool) error {
-	return s.setBool("smtpEnable", value)
-}
-
-func (s *SettingService) GetSmtpHost() (string, error) {
-	return s.getString("smtpHost")
-}
-
-func (s *SettingService) SetSmtpHost(value string) error {
-	return s.setString("smtpHost", value)
-}
-
-func (s *SettingService) GetSmtpPort() (int, error) {
-	return s.getInt("smtpPort")
-}
-
-func (s *SettingService) SetSmtpPort(value int) error {
-	return s.setInt("smtpPort", value)
-}
-
-func (s *SettingService) GetSmtpUsername() (string, error) {
-	return s.getString("smtpUsername")
-}
-
-func (s *SettingService) SetSmtpUsername(value string) error {
-	return s.setString("smtpUsername", value)
-}
-
-func (s *SettingService) GetSmtpFrom() (string, error) {
-	return s.getString("smtpFrom")
-}
-
-func (s *SettingService) SetSmtpFrom(value string) error {
-	return s.setString("smtpFrom", value)
-}
-
-func (s *SettingService) GetSmtpFromName() (string, error) {
-	return s.getString("smtpFromName")
-}
-
-func (s *SettingService) SetSmtpFromName(value string) error {
-	return s.setString("smtpFromName", value)
-}
-
-func (s *SettingService) GetSmtpPassword() (string, error) {
-	return s.getString("smtpPassword")
-}
-
-func (s *SettingService) SetSmtpPassword(value string) error {
-	return s.setString("smtpPassword", value)
-}
-
-func (s *SettingService) GetSmtpTo() (string, error) {
-	return s.getString("smtpTo")
-}
-
-func (s *SettingService) SetSmtpTo(value string) error {
-	return s.setString("smtpTo", value)
-}
-
-func (s *SettingService) GetSmtpEncryptionType() (string, error) {
-	return s.getString("smtpEncryptionType")
-}
-
-func (s *SettingService) SetSmtpEncryptionType(value string) error {
-	return s.setString("smtpEncryptionType", value)
-}
-
-func (s *SettingService) GetSmtpCpu() (int, error) {
-	return s.getInt("smtpCpu")
-}
-
-func (s *SettingService) SetSmtpCpu(value int) error {
-	return s.setInt("smtpCpu", value)
-}
-
-func (s *SettingService) GetSmtpMemory() (int, error) {
-	return s.getInt("smtpMemory")
-}
-
-func (s *SettingService) SetSmtpMemory(value int) error {
-	return s.setInt("smtpMemory", value)
-}
-
 // SecretClears marks redacted secrets the user explicitly emptied. Without a
 // flag, a blank submitted secret means "unchanged" (the field is always served
 // blank to the browser) and the stored value is preserved.
 type SecretClears struct {
-	TgBotToken   bool
 	LdapPassword bool
-	SmtpPassword bool
 }
 
 func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting, clears SecretClears) error {
@@ -1150,9 +727,6 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting, clears 
 		return err
 	}
 	if err := validateSettingsURLs(allSetting); err != nil {
-		return err
-	}
-	if err := validateSubUserAgentRegexes(allSetting); err != nil {
 		return err
 	}
 	if err := allSetting.CheckValid(); err != nil {
@@ -1195,38 +769,6 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting, clears 
 	})
 }
 
-func validateSubUserAgentRegexes(allSetting *entity.AllSetting) error {
-	jsonPattern, err := validateSubUserAgentRegex("Xray JSON", allSetting.SubJsonUserAgentRegex, DefaultSubJsonUserAgentRegex)
-	if err != nil {
-		return err
-	}
-	clashPattern, err := validateSubUserAgentRegex("Clash/Mihomo", allSetting.SubClashUserAgentRegex, DefaultSubClashUserAgentRegex)
-	if err != nil {
-		return err
-	}
-	allSetting.SubJsonUserAgentRegex = jsonPattern
-	allSetting.SubClashUserAgentRegex = clashPattern
-	return nil
-}
-
-func validateSubUserAgentRegex(name, pattern, defaultPattern string) (string, error) {
-	pattern = strings.TrimSpace(pattern)
-	effectivePattern := pattern
-	if effectivePattern == "" {
-		effectivePattern = defaultPattern
-	}
-	if len(effectivePattern) > maxRegexLength {
-		return "", common.NewErrorf("%s User-Agent regex must not exceed %d characters", name, maxRegexLength)
-	}
-	if _, err := regexp.Compile(effectivePattern); err != nil {
-		return "", common.NewErrorf("%s User-Agent regex is invalid: %v", name, err)
-	}
-	// Return the original pattern (empty string if cleared) so the caller
-	// can distinguish "user explicitly set empty" from "user set a value".
-	// The empty value is stored in the DB and inherited as runtime default.
-	return pattern, nil
-}
-
 func ValidateRegex(pattern string) error {
 	if len(pattern) > maxRegexLength {
 		return common.NewErrorf("Regular expression must not exceed %d characters", maxRegexLength)
@@ -1238,13 +780,6 @@ func ValidateRegex(pattern string) error {
 }
 
 func (s *SettingService) preserveRedactedSecrets(allSetting *entity.AllSetting, clears SecretClears) error {
-	if !clears.TgBotToken && strings.TrimSpace(allSetting.TgBotToken) == "" {
-		value, err := s.GetTgBotToken()
-		if err != nil {
-			return err
-		}
-		allSetting.TgBotToken = value
-	}
 	if !clears.LdapPassword && strings.TrimSpace(allSetting.LdapPassword) == "" {
 		value, err := s.GetLdapPassword()
 		if err != nil {
@@ -1259,13 +794,6 @@ func (s *SettingService) preserveRedactedSecrets(allSetting *entity.AllSetting, 
 		}
 		allSetting.TwoFactorToken = value
 	}
-	if !clears.SmtpPassword && strings.TrimSpace(allSetting.SmtpPassword) == "" {
-		value, err := s.GetSmtpPassword()
-		if err != nil {
-			return err
-		}
-		allSetting.SmtpPassword = value
-	}
 	return nil
 }
 
@@ -1277,25 +805,12 @@ func validateSettingsURLs(allSetting *entity.AllSetting) error {
 		}
 		allSetting.ExternalTrafficInformURI = u
 	}
-	if allSetting.TgBotAPIServer != "" {
-		u, err := SanitizeHTTPURL(allSetting.TgBotAPIServer)
-		if err != nil {
-			return common.NewError("telegram API server URL is invalid:", err)
-		}
-		allSetting.TgBotAPIServer = u
-	}
-	// Support/profile links land in subscription headers and page data, where
-	// client apps resolve a scheme-less value against the panel's own domain.
-	// Non-http schemes (tg://, mailto:) are legitimate here, so only default
-	// the scheme instead of forcing SanitizeHTTPURL's http(s)-only rule.
-	allSetting.SubSupportUrl = common.EnsureURLScheme(allSetting.SubSupportUrl)
-	allSetting.SubProfileUrl = common.EnsureURLScheme(allSetting.SubProfileUrl)
 	return nil
 }
 
 func (s *SettingService) UpdateSecret(key string, value string) error {
 	switch key {
-	case "tgBotToken", "ldapPassword", "twoFactorToken":
+	case "ldapPassword", "twoFactorToken":
 		return s.saveSetting(key, strings.TrimSpace(value))
 	default:
 		return common.NewError("secret key is not replaceable:", key)
@@ -1333,29 +848,7 @@ func extractHostname(host string) string {
 	return "[" + h + "]"
 }
 
-// BuildSubURIBase is shared by GetDefaultSettings (the panel's Client
-// Information page) and the subscription page so both render subscription
-// URLs identically.
-func (s *SettingService) BuildSubURIBase(host string) string {
-	subPort, _ := s.GetSubPort()
-	subDomain, _ := s.GetSubDomain()
-	subKeyFile, _ := s.GetSubKeyFile()
-	subCertFile, _ := s.GetSubCertFile()
-	subTLS := subKeyFile != "" && subCertFile != ""
-	if subDomain == "" {
-		subDomain = extractHostname(host)
-	}
-	scheme := "http"
-	if subTLS {
-		scheme = "https"
-	}
-	if (subPort == 443 && subTLS) || (subPort == 80 && !subTLS) {
-		return scheme + "://" + subDomain
-	}
-	return fmt.Sprintf("%s://%s:%d", scheme, subDomain, subPort)
-}
-
-func (s *SettingService) GetDefaultSettings(host string) (any, error) {
+func (s *SettingService) GetDefaultSettings(_ string) (any, error) {
 	type settingFunc func() (any, error)
 	settings := map[string]settingFunc{
 		"expireDiff":       func() (any, error) { return s.GetExpireDiff() },
@@ -1363,20 +856,10 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 		"pageSize":         func() (any, error) { return s.GetPageSize() },
 		"defaultCert":      func() (any, error) { return s.GetCertFile() },
 		"defaultKey":       func() (any, error) { return s.GetKeyFile() },
-		"tgBotEnable":      func() (any, error) { return s.GetTgbotEnabled() },
-		"subThemeDir":      func() (any, error) { return s.GetSubThemeDir() },
-		"subEnable":        func() (any, error) { return s.GetSubEnable() },
-		"subJsonEnable":    func() (any, error) { return s.GetSubJsonEnable() },
-		"subClashEnable":   func() (any, error) { return s.GetSubClashEnable() },
-		"subTitle":         func() (any, error) { return s.GetSubTitle() },
-		"subURI":           func() (any, error) { return s.GetSubURI() },
-		"subJsonURI":       func() (any, error) { return s.GetSubJsonURI() },
-		"subClashURI":      func() (any, error) { return s.GetSubClashURI() },
 		"datepicker":       func() (any, error) { return s.GetDatepicker() },
 		"ipLimitEnable":    func() (any, error) { return s.GetIpLimitEnable() },
 		"accessLogEnable":  func() (any, error) { return s.GetAccessLogEnable() },
 		"webDomain":        func() (any, error) { return s.GetWebDomain() },
-		"subDomain":        func() (any, error) { return s.GetSubDomain() },
 		"devChannelEnable": func() (any, error) { return s.GetDevChannelEnable() },
 		"isDevBuild":       func() (any, error) { return config.IsDevBuild(), nil },
 	}
@@ -1389,39 +872,6 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 			return "", err
 		}
 		result[key] = value
-	}
-
-	subEnable := result["subEnable"].(bool)
-	subJsonEnable := false
-	if v, ok := result["subJsonEnable"]; ok {
-		if b, ok2 := v.(bool); ok2 {
-			subJsonEnable = b
-		}
-	}
-	subClashEnable := false
-	if v, ok := result["subClashEnable"]; ok {
-		if b, ok2 := v.(bool); ok2 {
-			subClashEnable = b
-		}
-	}
-	if (subEnable && result["subURI"].(string) == "") || (subJsonEnable && result["subJsonURI"].(string) == "") || (subClashEnable && result["subClashURI"].(string) == "") {
-		subURI := s.BuildSubURIBase(host)
-		subTitle, _ := s.GetSubTitle()
-		subPath, _ := s.GetSubPath()
-		subJsonPath, _ := s.GetSubJsonPath()
-		subClashPath, _ := s.GetSubClashPath()
-		if subEnable && result["subURI"].(string) == "" {
-			result["subURI"] = subURI + subPath
-		}
-		if result["subTitle"].(string) == "" {
-			result["subTitle"] = subTitle
-		}
-		if subJsonEnable && result["subJsonURI"].(string) == "" {
-			result["subJsonURI"] = subURI + subJsonPath
-		}
-		if subClashEnable && result["subClashURI"].(string) == "" {
-			result["subClashURI"] = subURI + subClashPath
-		}
 	}
 
 	return result, nil

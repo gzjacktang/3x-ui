@@ -21,7 +21,6 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/netsafe"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/wirecodec"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/entity"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
 
@@ -626,24 +625,6 @@ func (r *Remote) GetWebCertFiles(ctx context.Context) (*WebCertFiles, error) {
 	return &files, nil
 }
 
-// GetDescendants fetches the node's read-only summaries of the nodes IT
-// manages, so this panel can surface them as transitive sub-nodes in a chained
-// topology (#4983). Best-effort: an old-build node without the endpoint returns
-// an error the caller ignores.
-func (r *Remote) GetDescendants(ctx context.Context) ([]model.NodeSummary, error) {
-	env, err := r.do(ctx, http.MethodGet, "panel/api/server/descendants", nil)
-	if err != nil {
-		return nil, err
-	}
-	var out []model.NodeSummary
-	if len(env.Obj) > 0 {
-		if err := json.Unmarshal(env.Obj, &out); err != nil {
-			return nil, fmt.Errorf("decode descendants: %w", err)
-		}
-	}
-	return out, nil
-}
-
 func (r *Remote) ResetClientTraffic(ctx context.Context, _ *model.Inbound, email string) error {
 	_, err := r.do(ctx, http.MethodPost,
 		"panel/api/clients/resetTraffic/"+url.PathEscape(email), nil)
@@ -670,25 +651,6 @@ type TrafficSnapshot struct {
 	// the per-GUID endpoint — OnlineEmails is the fallback then.
 	OnlineTree    map[string][]string
 	LastOnlineMap map[string]int64
-	// HostGroups carries the node's per-inbound host overrides (TLS/SNI/
-	// fingerprint), fetched only when the snapshot holds a not-yet-adopted tag.
-	HostGroups []*entity.HostGroup
-}
-
-// FetchHostGroups pulls the node's host overrides so a freshly adopted inbound
-// keeps its subscription TLS/SNI/fingerprint settings on the master.
-func (r *Remote) FetchHostGroups(ctx context.Context) ([]*entity.HostGroup, error) {
-	env, err := r.do(ctx, http.MethodGet, "panel/api/hosts/list", nil)
-	if err != nil {
-		return nil, err
-	}
-	var groups []*entity.HostGroup
-	if len(env.Obj) > 0 {
-		if err := json.Unmarshal(env.Obj, &groups); err != nil {
-			return nil, fmt.Errorf("decode host groups: %w", err)
-		}
-	}
-	return groups, nil
 }
 
 func (r *Remote) FetchTrafficSnapshot(ctx context.Context) (*TrafficSnapshot, error) {

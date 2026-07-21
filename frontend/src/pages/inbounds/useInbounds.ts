@@ -15,18 +15,6 @@ import { DefaultsPayloadSchema, type DefaultsPayload } from '@/schemas/defaults'
 import type { InboundSpeedEntry } from './list/types';
 import { TRAFFIC_POLL_INTERVAL_S } from '@/lib/traffic/poll-interval';
 
-export interface SubSettings {
-  enable: boolean;
-  subTitle: string;
-  subURI: string;
-  subJsonURI: string;
-  subJsonEnable: boolean;
-  // Configured public host (Sub Domain, else Web Domain) used as the share/QR
-  // link host when the panel is reached on a loopback address. Empty if neither
-  // is set.
-  publicHost: string;
-}
-
 type DBInboundInstance = InstanceType<typeof DBInbound>;
 
 // Speed is delta-derived, so it can't be recomputed until the first poll after
@@ -165,19 +153,11 @@ export function useInbounds() {
   const defaults = defaultsQuery.data ?? {};
   const expireDiff = (defaults.expireDiff ?? 0) * 86400000;
   const trafficDiff = (defaults.trafficDiff ?? 0) * 1073741824;
-  const tgBotEnable = !!defaults.tgBotEnable;
   const ipLimitEnable = !!defaults.ipLimitEnable;
   const pageSize = defaults.pageSize ?? 0;
   const datepicker = (defaults.datepicker as 'gregorian' | 'jalalian') || 'gregorian';
 
-  const subSettings: SubSettings = useMemo(() => ({
-    enable: !!defaults.subEnable,
-    subTitle: defaults.subTitle || '',
-    subURI: defaults.subURI || '',
-    subJsonURI: defaults.subJsonURI || '',
-    subJsonEnable: !!defaults.subJsonEnable,
-    publicHost: defaults.subDomain || defaults.webDomain || '',
-  }), [defaults.subEnable, defaults.subTitle, defaults.subURI, defaults.subJsonURI, defaults.subJsonEnable, defaults.subDomain, defaults.webDomain]);
+  const publicHost = defaults.webDomain || '';
 
   useEffect(() => {
     if (defaults.datepicker) setDatepicker(datepicker);
@@ -553,9 +533,8 @@ export function useInbounds() {
     totals,
     expireDiff,
     trafficDiff,
-    subSettings,
+    publicHost,
     datepicker,
-    tgBotEnable,
     ipLimitEnable,
     pageSize,
     refresh,

@@ -55,11 +55,7 @@ export const InboundOptionSchema = z.object({
   wgMtu: z.number().optional(),
   wgDns: z.string().optional(),
   mtprotoDomain: z.string().optional(),
-  // Hosting node id; absent/null for this panel's own inbounds (#4997).
   nodeId: z.number().nullable().optional(),
-  // Share-host resolution inputs, mirroring the backend resolveInboundAddress so
-  // the clients page picks the same WireGuard endpoint host as the subscription:
-  // the hosting node address, the inbound listen, and its share-address strategy.
   nodeAddress: z.string().optional(),
   listen: z.string().optional(),
   shareAddr: z.string().optional(),
@@ -86,13 +82,10 @@ export const ClientPageResponseSchema = z.object({
   page: z.number(),
   pageSize: z.number(),
   summary: ClientsSummarySchema.nullable().optional(),
-  groups: nullableStringArray.optional(),
 });
 
-// A per-client external link surfaced in the client's subscription:
-// kind=link is a single share link, kind=subscription is a remote sub URL.
 export const ExternalLinkSchema = z.object({
-  kind: z.enum(['link', 'subscription']).default('link'),
+  kind: z.literal('link').default('link'),
   value: z.string(),
   remark: z.string().optional().default(''),
 }).loose();
@@ -161,16 +154,6 @@ export const ActiveInboundsByNodeSchema = z
   .nullable()
   .transform((v) => v ?? {});
 
-export const GroupSummarySchema = z.object({
-  name: z.string(),
-  clientCount: z.number(),
-  trafficUsed: z.number().nullable().transform((v) => v ?? 0),
-  up: z.number().nullable().transform((v) => v ?? 0),
-  down: z.number().nullable().transform((v) => v ?? 0),
-});
-
-export const GroupSummaryListSchema = z.array(GroupSummarySchema).nullable().transform((v) => v ?? []);
-
 export function hasForbiddenClientChars(value: string): boolean {
   if (value.includes('/') || value.includes('\\') || value.includes(' ')) return true;
   for (let i = 0; i < value.length; i++) {
@@ -186,7 +169,6 @@ export const ClientFormSchema = z.object({
     .trim()
     .min(1, 'pages.clients.email')
     .refine((v) => !hasForbiddenClientChars(v), 'pages.clients.emailInvalidChars'),
-  subId: z.string().refine((v) => !hasForbiddenClientChars(v), 'pages.clients.subIdInvalidChars'),
   uuid: z.string(),
   password: z.string(),
   auth: z.string(),
@@ -198,8 +180,6 @@ export const ClientFormSchema = z.object({
   delayedDays: z.number().int().min(0),
   reset: z.number().int().min(0),
   limitIp: z.number().int().min(0),
-  tgId: z.number().int().min(0),
-  group: z.string(),
   comment: z.string(),
   enable: z.boolean(),
   inboundIds: z.array(z.number()),
@@ -226,8 +206,6 @@ export const ClientBulkAddFormSchema = z.object({
   emailPrefix: z.string(),
   emailPostfix: z.string(),
   quantity: z.number().int().min(1).max(1000),
-  subId: z.string(),
-  group: z.string(),
   comment: z.string(),
   flow: z.string(),
   limitIp: z.number().int().min(0),
@@ -253,4 +231,3 @@ export type BulkDetachResult = z.infer<typeof BulkDetachResultSchema>;
 export type ClientBulkAddFormValues = z.infer<typeof ClientBulkAddFormSchema>;
 export type ClientBulkAdjustFormValues = z.infer<typeof ClientBulkAdjustFormSchema>;
 export type ClientFormValues = z.infer<typeof ClientFormSchema>;
-export type GroupSummary = z.infer<typeof GroupSummarySchema>;

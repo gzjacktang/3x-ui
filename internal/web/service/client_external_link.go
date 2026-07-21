@@ -1,7 +1,6 @@
 package service
 
 import (
-	"net/url"
 	"strings"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
@@ -30,10 +29,6 @@ func (s *ClientService) GetExternalLinksForRecord(id int) ([]model.ClientExterna
 	return rows, nil
 }
 
-// normalizeExternalLinks validates and orders the incoming rows. A "link" must
-// parse to a supported share-link scheme; a "subscription" must be an http(s)
-// URL. Blank values are dropped; an invalid value is a hard error so the
-// operator gets immediate feedback instead of a silently missing config.
 func normalizeExternalLinks(inputs []ExternalLinkInput) ([]model.ClientExternalLink, error) {
 	out := make([]model.ClientExternalLink, 0, len(inputs))
 	for _, in := range inputs {
@@ -43,10 +38,6 @@ func normalizeExternalLinks(inputs []ExternalLinkInput) ([]model.ClientExternalL
 		}
 		kind := strings.TrimSpace(in.Kind)
 		switch kind {
-		case model.ExternalLinkKindSubscription:
-			if !isHTTPURL(value) {
-				return nil, common.NewError("external subscription must be an http(s) URL: " + value)
-			}
 		case model.ExternalLinkKindLink, "":
 			kind = model.ExternalLinkKindLink
 			if _, err := link.ParseLink(value); err != nil {
@@ -63,11 +54,6 @@ func normalizeExternalLinks(inputs []ExternalLinkInput) ([]model.ClientExternalL
 		})
 	}
 	return out, nil
-}
-
-func isHTTPURL(s string) bool {
-	u, err := url.Parse(s)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // SetExternalLinksForRecord replaces a client's entire external-link set.

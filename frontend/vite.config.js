@@ -178,7 +178,6 @@ export default defineConfig({
       input: {
         index: path.resolve(__dirname, 'index.html'),
         login: path.resolve(__dirname, 'login.html'),
-        subpage: path.resolve(__dirname, 'subpage.html'),
       },
       output: {
         manualChunks(id) {
@@ -212,11 +211,6 @@ export default defineConfig({
           if (id.includes('/node_modules/otpauth/')) return 'vendor-otpauth';
           if (id.includes('/node_modules/@tanstack/')) return 'vendor-tanstack';
           if (id.includes('/node_modules/react-router')) return 'vendor-router';
-          if (
-            id.includes('/node_modules/swagger-ui-react/')
-            || id.includes('/node_modules/swagger-ui/')
-            || id.includes('/node_modules/swagger-client/')
-          ) return 'vendor-swagger';
           if (id.includes('/node_modules/uplot/')) return 'vendor-uplot';
           if (id.includes('dayjs')) return 'vendor-dayjs';
           return 'vendor';

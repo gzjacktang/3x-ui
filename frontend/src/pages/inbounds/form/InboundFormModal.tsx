@@ -83,7 +83,6 @@ import FallbacksCard from './FallbacksCard';
 import SniffingTab from './SniffingTab';
 
 import type { DBInbound } from '@/models/dbinbound';
-import type { NodeRecord } from '@/api/queries/useNodesQuery';
 
 
 /* Render a field label with a hover tooltip icon instead of an `extra` help line below. */
@@ -140,7 +139,7 @@ interface InboundFormModalProps {
   mode: 'add' | 'edit';
   dbInbound: DBInbound | null;
   dbInbounds: DBInbound[];
-  availableNodes?: NodeRecord[];
+  availableNodes?: unknown[];
   availableNodesFetched?: boolean;
 }
 
@@ -189,8 +188,6 @@ export default function InboundFormModal({
   mode,
   dbInbound,
   dbInbounds,
-  availableNodes,
-  availableNodesFetched = true,
 }: InboundFormModalProps) {
   const { t } = useTranslation();
   const [messageApi, messageContextHolder] = message.useMessage();
@@ -213,15 +210,8 @@ export default function InboundFormModal({
     addAllFallbacks,
   } = useInboundFallbacks(dbInbound, dbInbounds);
 
-  const selectableNodes = (availableNodes || []).filter((n) => n.enable);
   const protocol = (useWatch({ control, name: 'protocol' }) ?? '') as string;
-  const isNodeEligible = NODE_ELIGIBLE_PROTOCOLS.has(protocol);
-  /*
-   * The `node` share-address strategy only means something when the inbound can
-   * actually live on a node — otherwise the node address it would resolve to is
-   * always empty. Offer it only then; `listen`/`custom` work for local inbounds.
-   */
-  const nodeShareOptionAvailable = selectableNodes.length > 0 && isNodeEligible;
+  const nodeShareOptionAvailable = false;
   const vlessEncryption = useWatch({ control, name: 'settings.encryption' }) ?? '';
   const ssMethod = useWatch({ control, name: 'settings.method' });
   const isSSWith2022 = isSS2022({
@@ -410,13 +400,13 @@ export default function InboundFormModal({
    */
   useEffect(() => {
     if (!open) return;
-    if (!availableNodesFetched || !protocol) return;
+    if (!protocol) return;
     const current = getV('shareAddrStrategy') as InboundFormValues['shareAddrStrategy'] | undefined;
     if (!nodeShareOptionAvailable && (current ?? 'node') === 'node') {
       setV('shareAddrStrategy', 'listen');
     }
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [open, availableNodesFetched, protocol, nodeShareOptionAvailable, shareAddrStrategy]);
+  }, [open, protocol, nodeShareOptionAvailable, shareAddrStrategy]);
 
   /*
    * Protocol picker reset cascades through the form — clearing the settings DU
@@ -523,22 +513,6 @@ export default function InboundFormModal({
         <Input />
       </FormField>
 
-      {selectableNodes.length > 0 && isNodeEligible && (
-        <FormField name="nodeId" label={t('pages.inbounds.deployTo')}>
-          <Select
-            showSearch
-            disabled={mode === 'edit'}
-            placeholder={t('pages.inbounds.localPanel')}
-            allowClear
-            options={selectableNodes.map((n) => ({
-              value: n.id,
-              label: `${n.name}${n.status === 'offline' ? ' (offline)' : ''}`,
-              disabled: n.status === 'offline',
-            }))}
-          />
-        </FormField>
-      )}
-
       <FormField name="protocol" label={t('pages.inbounds.protocol')}>
         <Select id="protocol" disabled={mode === 'edit'} options={PROTOCOL_OPTIONS} />
       </FormField>
@@ -576,13 +550,6 @@ export default function InboundFormModal({
           <Input placeholder="edge.example.com" />
         </FormField>
       )}
-
-      <FormField
-        name="subSortIndex"
-        label={labelWithHint(t('pages.inbounds.form.subSortIndex'), t('pages.inbounds.form.subSortIndexHelp'))}
-      >
-        <InputNumber min={1} />
-      </FormField>
 
       <FormField
         name="port"

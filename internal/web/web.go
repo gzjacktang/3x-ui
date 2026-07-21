@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
-	"github.com/mhsanaei/3x-ui/v3/internal/eventbus"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/mtproto"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
@@ -29,11 +28,8 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/web/network"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/runtime"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service/email"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/panel"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service/tgbot"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/websocket"
-	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/sessions"
@@ -119,11 +115,8 @@ type Server struct {
 
 	xrayService    service.XrayService
 	settingService service.SettingService
-	tgbotService   tgbot.Tgbot
+	wsHub          *websocket.Hub
 
-	wsHub *websocket.Hub
-
-	bus  *eventbus.Bus
 	cron *cron.Cron
 
 	ctx    context.Context
@@ -220,7 +213,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 
 	// init i18n — still used by backend strings (errors, log messages,
 	// SubPage menu entries) even though the Go template engine is gone.
-	err = locale.InitLocalizer(i18nFS, &s.settingService)
+	err = locale.InitLocalizer(i18nFS)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +240,6 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 
 	s.index = controller.NewIndexController(g)
 	s.panel = controller.NewXUIController(g)
-	g.GET("/panel/api/openapi.json", controller.ServeOpenAPISpec)
 	s.api = controller.NewAPIController(g)
 
 	// Initialize WebSocket hub
@@ -284,20 +276,12 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 // node/xray state is unchanged, and export per-job duration/skipped/error
 // counters.
 const (
-	cadenceXrayRunning   = "@every 1s"
-	cadenceXrayRestart   = "@every 30s"
-	cadenceXrayTraffic   = "@every 5s"
-	cadenceMtproto       = "@every 10s"
-	cadenceClientIPScan  = "@every 10s"
-	cadenceNodeHeartbeat = "@every 5s"
-	cadenceNodeTraffic   = "@every 5s"
-	cadenceOutboundSub   = "@every 5m"
-	cadenceXrayLogPrune  = "@every 10m"
-	cadenceCheckHash     = "@every 2m"
-	// cpu.Percent samples over a full minute (blocking), so a finer cadence just
-	// stacks overlapping samplers; subscribers rate-limit alerts to 1/min anyway.
-	cadenceCPUAlarm    = "@every 1m"
-	cadenceMemoryAlarm = "@every 1m"
+	cadenceXrayRunning  = "@every 1s"
+	cadenceXrayRestart  = "@every 30s"
+	cadenceXrayTraffic  = "@every 5s"
+	cadenceMtproto      = "@every 10s"
+	cadenceClientIPScan = "@every 10s"
+	cadenceXrayLogPrune = "@every 10m"
 )
 
 // startTask schedules background jobs (Xray checks, traffic jobs, cron
@@ -330,13 +314,6 @@ func (s *Server) startTask(restartXray bool) {
 	// check client ips from log file every 10 sec
 	_, _ = s.cron.AddJob(cadenceClientIPScan, job.NewCheckClientIpJob())
 
-	_, _ = s.cron.AddJob(cadenceNodeHeartbeat, job.NewNodeHeartbeatJob())
-
-	_, _ = s.cron.AddJob(cadenceNodeTraffic, job.NewNodeTrafficSyncJob())
-
-	// Outbound subscription auto-refresh (respects per-sub updateInterval)
-	_, _ = s.cron.AddJob(cadenceOutboundSub, job.NewOutboundSubscriptionJob())
-
 	// check client ips from log file every day
 	_, _ = s.cron.AddJob("@daily", job.NewClearLogsJob())
 	_, _ = s.cron.AddJob(cadenceXrayLogPrune, job.NewPruneXrayLogsJob())
@@ -363,36 +340,6 @@ func (s *Server) startTask(restartXray bool) {
 		_, _ = s.cron.AddJob(runtime, j)
 	}
 
-	// Telegram-bot–dependent jobs: periodic stats report + callback-hash cleanup.
-	isTgbotenabled, err := s.settingService.GetTgbotEnabled()
-	if (err == nil) && (isTgbotenabled) {
-		runtime, err := s.settingService.GetTgbotRuntime()
-		if err != nil {
-			logger.Warningf("Add NewStatsNotifyJob: failed to load runtime: %v; using default @daily", err)
-			runtime = "@daily"
-		} else if strings.TrimSpace(runtime) == "" {
-			logger.Warning("Add NewStatsNotifyJob runtime is empty, using default @daily")
-			runtime = "@daily"
-		}
-		logger.Infof("Tg notify enabled,run at %s", runtime)
-		if _, err = s.cron.AddJob(runtime, job.NewStatsNotifyJob()); err != nil {
-			logger.Warningf("Add NewStatsNotifyJob: failed to schedule runtime %q: %v", runtime, err)
-		}
-
-		// check for Telegram bot callback query hash storage reset
-		_, _ = s.cron.AddJob(cadenceCheckHash, job.NewCheckHashStorageJob())
-	}
-
-	// CPU monitor publishes cpu.high events; register it whenever any notifier
-	// (Telegram or Email) wants them, independent of the Telegram bot being on.
-	if s.cpuAlarmWanted() {
-		_, _ = s.cron.AddJob(cadenceCPUAlarm, job.NewCheckCpuJob())
-	}
-	// Memory monitor publishes memory.high events; register it whenever any notifier wants them.
-	if s.memoryAlarmWanted() {
-		_, _ = s.cron.AddJob(cadenceMemoryAlarm, job.NewCheckMemJob())
-	}
-
 	if mins := sys.MemoryReleaseIntervalMinutes(); mins > 0 {
 		_, _ = s.cron.AddJob(fmt.Sprintf("@every %dm", mins), job.NewMemoryReleaseJob())
 		go func() {
@@ -402,77 +349,16 @@ func (s *Server) startTask(restartXray bool) {
 	}
 }
 
-// cpuAlarmWanted reports whether any notifier is configured to receive cpu.high
-// alerts, so the minute-long blocking CPU sampler only runs when it's needed.
-func (s *Server) cpuAlarmWanted() bool {
-	wants := func(events string, threshold int) bool {
-		if threshold <= 0 {
-			return false
-		}
-		for e := range strings.SplitSeq(events, ",") {
-			if strings.TrimSpace(e) == string(eventbus.EventCPUHigh) {
-				return true
-			}
-		}
-		return false
-	}
-	if on, _ := s.settingService.GetTgbotEnabled(); on {
-		events, _ := s.settingService.GetTgEnabledEvents()
-		cpu, _ := s.settingService.GetTgCpu()
-		if wants(events, cpu) {
-			return true
-		}
-	}
-	if on, _ := s.settingService.GetSmtpEnable(); on {
-		events, _ := s.settingService.GetSmtpEnabledEvents()
-		cpu, _ := s.settingService.GetSmtpCpu()
-		if wants(events, cpu) {
-			return true
-		}
-	}
-	return false
-}
-
-// memoryAlarmWanted reports whether any notifier is configured to receive memory.high alerts.
-func (s *Server) memoryAlarmWanted() bool {
-	wants := func(events string, threshold int) bool {
-		if threshold <= 0 {
-			return false
-		}
-		for e := range strings.SplitSeq(events, ",") {
-			if strings.TrimSpace(e) == string(eventbus.EventMemoryHigh) {
-				return true
-			}
-		}
-		return false
-	}
-	if on, _ := s.settingService.GetTgbotEnabled(); on {
-		events, _ := s.settingService.GetTgEnabledEvents()
-		mem, _ := s.settingService.GetTgMemory()
-		if wants(events, mem) {
-			return true
-		}
-	}
-	if on, _ := s.settingService.GetSmtpEnable(); on {
-		events, _ := s.settingService.GetSmtpEnabledEvents()
-		mem, _ := s.settingService.GetSmtpMemory()
-		if wants(events, mem) {
-			return true
-		}
-	}
-	return false
-}
-
 // Start initializes and starts the web server with configured settings, routes, and background jobs.
 func (s *Server) Start() (err error) {
-	return s.start(true, true)
+	return s.start(true)
 }
 
 func (s *Server) StartPanelOnly() (err error) {
-	return s.start(false, true)
+	return s.start(false)
 }
 
-func (s *Server) start(restartXray bool, startTgBot bool) (err error) {
+func (s *Server) start(restartXray bool) (err error) {
 	// This is an anonymous function, no function name
 	defer func() {
 		if err != nil {
@@ -509,7 +395,6 @@ func (s *Server) start(restartXray bool, startTgBot bool) (err error) {
 		APIPort:        func() int { return s.xrayService.GetXrayAPIPort() },
 		SetNeedRestart: func() { s.xrayService.SetToNeedRestart() },
 	}))
-	runtime.GetManager().SetNodeEgressResolver(&s.settingService)
 	// Supply the master client certificate for nodes in mtls mode. Issued lazily
 	// from the node CA on first use; runtime stays free of a service import.
 	runtime.SetMasterClientCertProvider(func() (tls.Certificate, error) {
@@ -593,89 +478,20 @@ func (s *Server) start(restartXray bool, startTgBot bool) (err error) {
 		_ = s.httpServer.Serve(listener)
 	}()
 
-	// Create event bus before startTask so jobs can use it
-	s.bus = eventbus.New(eventbus.DefaultBufferSize)
-	service.SetEventBus(s.bus)
-	job.EventBus = s.bus
-	tgbot.EventBus = s.bus
-
-	// Wire xray crash callback BEFORE startTask so it's ready
-	xray.OnCrash = func(err error) {
-		if s.bus != nil {
-			s.bus.Publish(eventbus.Event{
-				Type: eventbus.EventXrayCrash,
-				Data: err.Error(),
-			})
-		}
-	}
-
-	// Register email subscriber (always — it checks smtpEnable at runtime)
-	emailService := email.NewEmailService(s.settingService)
-	emailSub := email.NewSubscriber(s.settingService, emailService)
-	s.bus.Subscribe("email-notifier", emailSub.HandleEvent)
-
-	// Wire email service to controller for test endpoint
-	controller.SetEmailService(emailService)
-
-	// Wire Telegram test function to controller
-	controller.SetTestTgFunc(func() error {
-		if !s.tgbotService.IsRunning() {
-			return fmt.Errorf("telegram bot is not running (check token and chat ID)")
-		}
-		if err := s.tgbotService.TestConnection(); err != nil {
-			return fmt.Errorf("telegram API test failed: %w", err)
-		}
-		s.tgbotService.SendMsgToTgbotAdmins("✅ Test message from 3x-ui")
-		return nil
-	})
-
-	controller.SetReloadTgbotFunc(func() {
-		enabled, err := s.settingService.GetTgbotEnabled()
-		if err != nil || !enabled {
-			if s.tgbotService.IsRunning() {
-				s.tgbotService.Stop()
-			}
-			if s.bus != nil {
-				s.bus.Unsubscribe("tg-notifier")
-			}
-			return
-		}
-		// Start() stops any previous receiver first, so it is safe whether or not the bot is already running.
-		tgBot := s.tgbotService.NewTgbot()
-		if startErr := tgBot.Start(i18nFS); startErr != nil {
-			logger.Warning("reload Telegram bot failed:", startErr)
-			return
-		}
-		if s.bus != nil {
-			s.bus.Subscribe("tg-notifier", s.tgbotService.HandleEvent)
-		}
-	})
-
 	s.startTask(restartXray)
-
-	if startTgBot {
-		isTgbotenabled, err := s.settingService.GetTgbotEnabled()
-		if (err == nil) && (isTgbotenabled) {
-			tgBot := s.tgbotService.NewTgbot()
-			_ = tgBot.Start(i18nFS)
-			// Subscribe Telegram notifications for event bus
-			s.bus.Subscribe("tg-notifier", s.tgbotService.HandleEvent)
-		}
-	}
 
 	return nil
 }
 
-// Stop gracefully shuts down the web server, stops Xray, cron jobs, and Telegram bot.
 func (s *Server) Stop() error {
-	return s.stop(true, true)
+	return s.stop(true)
 }
 
 func (s *Server) StopPanelOnly() error {
-	return s.stop(false, true)
+	return s.stop(false)
 }
 
-func (s *Server) stop(stopXray bool, stopTgBot bool) error {
+func (s *Server) stop(stopXray bool) error {
 	s.cancel()
 	if stopXray {
 		_ = s.xrayService.StopXray()
@@ -684,17 +500,8 @@ func (s *Server) stop(stopXray bool, stopTgBot bool) error {
 	if s.cron != nil {
 		s.cron.Stop()
 	}
-	if s.bus != nil {
-		s.bus.Stop()
-	}
-	if err := service.PersistSystemMetrics(); err != nil {
-		logger.Warning("persist system metrics on shutdown failed:", err)
-	}
 	if stopXray {
 		service.StopTrafficWriter()
-	}
-	if stopTgBot && s.tgbotService.IsRunning() {
-		s.tgbotService.Stop()
 	}
 	// Gracefully stop WebSocket hub
 	if s.wsHub != nil {

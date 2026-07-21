@@ -3,7 +3,6 @@ package service
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -32,7 +31,6 @@ var (
 type XrayService struct {
 	inboundService InboundService
 	settingService SettingService
-	nodeService    NodeService
 	xrayAPI        xray.XrayAPI
 }
 
@@ -304,21 +302,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		xrayConfig.InboundConfigs = append(xrayConfig.InboundConfigs, *inboundConfig)
 	}
 
-	// Merge subscription-derived outbounds (if any) into the final outbounds array.
-	// These are additive: each subscription is placed before or after the template
-	// outbounds based on its Prepend flag, ordered by Priority. Tags assigned by the
-	// subscription service are kept stable across refreshes so that balancers and
-	// routing rules continue to work.
-	subSvc := &OutboundSubscriptionService{}
-	if prepend, appendList, err := subSvc.activeOutboundsSplit(); err == nil && (len(prepend) > 0 || len(appendList) > 0) {
-		mergeSubscriptionOutbounds(xrayConfig, prepend, appendList)
-	}
-
 	// Route opted-in local mtproto inbounds through the core's router. Each one
 	// gets a loopback SOCKS bridge — tagged with the inbound's own tag so it is
 	// matchable in routing rules — that its mtg sidecar dials Telegram through.
-	// Done after the subscription merge so a selected subscription outbound (or
-	// balancer) is a valid rule target.
 	for i := range inbounds {
 		inbound := inbounds[i]
 		if inbound.Protocol != model.MTProto || !inbound.Enable || inbound.NodeID != nil {
@@ -327,19 +313,10 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		injectMtprotoEgress(xrayConfig, inbound)
 	}
 
-	// Wire the panel's own HTTP traffic through the configured outbound, after
-	// the subscription merge so subscription outbound tags are valid targets.
 	if egressTag, err := s.settingService.GetPanelOutbound(); err != nil {
 		logger.Warning("read panelOutbound setting failed:", err)
 	} else if egressTag != "" {
 		injectPanelEgress(xrayConfig, egressTag)
-	}
-
-	nodes, err := s.nodeService.GetAll()
-	if err != nil {
-		logger.Warning("read nodes for egress injection failed:", err)
-	} else {
-		injectNodeEgresses(xrayConfig, nodes)
 	}
 
 	return xrayConfig, nil
@@ -416,88 +393,6 @@ func injectPanelEgress(cfg *xray.Config, outboundTag string) {
 		Settings: json_util.RawMessage(`{"auth":"noauth","udp":false}`),
 		Tag:      PanelEgressInboundTag,
 	})
-}
-
-// NodeEgressInboundTag returns the loopback SOCKS inbound tag for a given node.
-func NodeEgressInboundTag(nodeID int) string {
-	return fmt.Sprintf("node-egress-%d", nodeID)
-}
-
-// nodeEgressBasePort is the first port tried for node egress bridges.
-const nodeEgressBasePort = 62800
-
-// injectNodeEgresses appends a loopback SOCKS inbound per enabled node that has
-// an OutboundTag, and prepends a routing rule sending that inbound's traffic to
-// the selected outbound tag. These bridges are hot-appliable.
-func injectNodeEgresses(cfg *xray.Config, nodes []*model.Node) {
-	routing := map[string]any{}
-	if len(cfg.RouterConfig) > 0 {
-		if err := json.Unmarshal(cfg.RouterConfig, &routing); err != nil {
-			logger.Warning("node egress: routing section is unparsable, skipping injection:", err)
-			return
-		}
-	}
-
-	used := make(map[int]struct{}, len(cfg.InboundConfigs))
-	usedTags := make(map[string]struct{}, len(cfg.InboundConfigs))
-	for i := range cfg.InboundConfigs {
-		used[cfg.InboundConfigs[i].Port] = struct{}{}
-		usedTags[cfg.InboundConfigs[i].Tag] = struct{}{}
-	}
-
-	rules, _ := routing["rules"].([]any)
-	newRules := make([]any, 0)
-
-	for _, n := range nodes {
-		if !n.Enable || n.OutboundTag == "" {
-			continue
-		}
-		tag := NodeEgressInboundTag(n.Id)
-		if _, exists := usedTags[tag]; exists {
-			logger.Warning("node egress: inbound tag [", tag, "] already exists, skipping")
-			continue
-		}
-		usedTags[tag] = struct{}{}
-
-		rule := map[string]any{
-			"type":       "field",
-			"inboundTag": []any{tag},
-		}
-		if routingTagIsBalancer(routing, n.OutboundTag) {
-			rule["balancerTag"] = n.OutboundTag
-		} else {
-			rule["outboundTag"] = n.OutboundTag
-		}
-		newRules = append(newRules, rule)
-
-		port := nodeEgressBasePort + n.Id
-		for {
-			if _, taken := used[port]; !taken {
-				break
-			}
-			port++
-		}
-		used[port] = struct{}{}
-
-		cfg.InboundConfigs = append(cfg.InboundConfigs, xray.InboundConfig{
-			Listen:   json_util.RawMessage(`"127.0.0.1"`),
-			Port:     port,
-			Protocol: "socks",
-			Settings: json_util.RawMessage(`{"auth":"noauth","udp":false}`),
-			Tag:      tag,
-		})
-	}
-
-	if len(newRules) == 0 {
-		return
-	}
-	routing["rules"] = append(newRules, rules...)
-	newRouting, err := json.Marshal(routing)
-	if err != nil {
-		logger.Warning("node egress: failed to rebuild routing section, skipping injection:", err)
-		return
-	}
-	cfg.RouterConfig = json_util.RawMessage(newRouting)
 }
 
 // routingTagIsBalancer reports whether tag names a balancer in the parsed
@@ -590,37 +485,6 @@ func injectMtprotoEgress(cfg *xray.Config, inbound *model.Inbound) {
 		Settings: json_util.RawMessage(mtprotoEgressSocksSettings),
 		Tag:      tag,
 	})
-}
-
-// mergeSubscriptionOutbounds appends the subscription outbounds to the
-// OutboundConfigs array of the xray config. It works on the already-unmarshaled
-// template so that manually configured outbounds are never overwritten.
-//
-// Safety: if we cannot parse the template's outbounds array, we leave
-// OutboundConfigs exactly as it came from the template (we do not inject
-// subscription outbounds). This prevents us from accidentally dropping the
-// user's manually configured outbounds when the template is in a weird state.
-func mergeSubscriptionOutbounds(cfg *xray.Config, prepend, appendList []any) {
-	if len(prepend) == 0 && len(appendList) == 0 {
-		return
-	}
-	var templateOutbounds []any
-	if len(cfg.OutboundConfigs) > 0 {
-		if err := json.Unmarshal(cfg.OutboundConfigs, &templateOutbounds); err != nil {
-			// Corrupt template outbounds — do not touch the field at all.
-			// The user will see problems on Xray start / next save.
-			return
-		}
-	}
-	var merged []any
-	merged = append(merged, prepend...)
-	merged = append(merged, templateOutbounds...)
-	merged = append(merged, appendList...)
-	combined, err := json.MarshalIndent(merged, "", "  ")
-	if err != nil {
-		return
-	}
-	cfg.OutboundConfigs = json_util.RawMessage(combined)
 }
 
 // ensureAPIServices guarantees the gRPC services the panel depends on are

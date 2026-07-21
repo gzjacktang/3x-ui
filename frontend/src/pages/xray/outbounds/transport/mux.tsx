@@ -29,19 +29,19 @@ export default function MuxForm({ protocol, network }: MuxFormProps) {
       {muxEnabled && (
         <>
           <FormField
-            label={t('pages.settings.subFormats.concurrency')}
+            label={t('pages.xray.fields.concurrency')}
             name={['mux', 'concurrency']}
           >
             <InputNumber min={-1} max={1024} />
           </FormField>
           <FormField
-            label={t('pages.settings.subFormats.xudpConcurrency')}
+            label={t('pages.xray.fields.xudpConcurrency')}
             name={['mux', 'xudpConcurrency']}
           >
             <InputNumber min={-1} max={1024} />
           </FormField>
           <FormField
-            label={t('pages.settings.subFormats.xudpUdp443')}
+            label={t('pages.xray.fields.xudpUdp443')}
             name={['mux', 'xudpProxyUDP443']}
           >
             <Select

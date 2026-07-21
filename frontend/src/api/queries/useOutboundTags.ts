@@ -3,10 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { keys } from '@/api/queryKeys';
 import { fetchXrayConfig } from '@/hooks/useXraySetting';
 
-// Available outbound (and balancer-eligible) tags the user can route an mtproto
-// inbound's Telegram traffic to. Shares the cached xray config query so opening
-// the inbound form costs no extra request when the Xray page was already
-// visited; `select` derives just the tag list without disturbing other readers.
 export function useOutboundTags(opts?: { excludeBlackhole?: boolean }) {
   const excludeBlackhole = opts?.excludeBlackhole ?? false;
   return useQuery({
@@ -20,9 +16,6 @@ export function useOutboundTags(opts?: { excludeBlackhole?: boolean }) {
         if (!ob?.tag) continue;
         if (excludeBlackhole && ob.protocol === 'blackhole') continue;
         tags.add(ob.tag);
-      }
-      for (const t of data?.subscriptionOutboundTags ?? []) {
-        if (t) tags.add(t);
       }
       // Balancers are valid routing targets too — injectMtprotoEgress emits a
       // balancerTag rule when the chosen tag names a balancer.
@@ -56,9 +49,6 @@ export function useOutboundTagGroups(opts?: { excludeBlackhole?: boolean }) {
         if (!ob?.tag) continue;
         if (excludeBlackhole && ob.protocol === 'blackhole') continue;
         outbounds.add(ob.tag);
-      }
-      for (const t of data?.subscriptionOutboundTags ?? []) {
-        if (t) outbounds.add(t);
       }
       const balancers: string[] = [];
       const bal = (data?.xraySetting?.routing as { balancers?: Array<{ tag?: string }> } | undefined)?.balancers;

@@ -310,19 +310,6 @@ func (s *InboundService) CopyInboundClients(targetInboundID int, sourceInboundID
 			}
 		}
 
-		if sourceClient.SubID == "" {
-			newSubID := uuid.NewString()
-			subNeedRestart, subErr := s.writeBackClientSubID(sourceInbound.Id, sourceClient, newSubID)
-			if subErr != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("%s: failed to write source subId: %v", originalEmail, subErr))
-				continue
-			}
-			if subNeedRestart {
-				needRestart = true
-			}
-			sourceClient.SubID = newSubID
-		}
-
 		targetEmail := s.nextAvailableCopiedEmail(originalEmail, targetInboundID, occupiedEmails)
 		targetClient, buildErr := s.buildTargetClientFromSource(sourceClient, targetInbound, targetEmail, flow)
 		if buildErr != nil {

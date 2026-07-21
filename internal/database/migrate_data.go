@@ -24,8 +24,6 @@ import (
 // during `x-ui migrate-db --dsn` (SQLite → PostgreSQL data migration) and in
 // related tests.
 //
-// Important: When adding a new top-level model (like OutboundSubscription),
-// you must add it here **in addition to** allModels() in internal/database/db.go;
 // TestMigrationModelsMatchPanelModels fails when the two lists drift apart.
 // This list is used for:
 //   - Creating the destination schema during cross-DB migration
@@ -49,13 +47,10 @@ func migrationModels() []any {
 		&model.ClientRecord{},
 		&model.ClientInbound{},
 		&model.ClientExternalLink{},
-		&model.ClientGroup{},
 		&model.InboundFallback{},
-		&model.Host{},
 		&model.NodeClientTraffic{},
 		&model.NodeClientIp{},
 		&model.ClientGlobalTraffic{},
-		&model.OutboundSubscription{},
 	}
 }
 

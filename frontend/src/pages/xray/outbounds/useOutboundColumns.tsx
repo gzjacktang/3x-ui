@@ -146,11 +146,11 @@ export function useOutboundColumns({
         title: (
           <span className="egress-header">
             {t('pages.xray.outbound.egress')}
-            <Tooltip title={t('pages.index.toggleIpVisibility')}>
+            <Tooltip title={t('pages.xray.toggleIpVisibility')}>
               {showEgressIp ? (
-                <EyeOutlined className="ip-toggle-icon" role="button" tabIndex={0} aria-label={t('pages.index.toggleIpVisibility')} onClick={() => setShowEgressIp(false)} onKeyDown={activateOnKey(() => setShowEgressIp(false))} />
+                <EyeOutlined className="ip-toggle-icon" role="button" tabIndex={0} aria-label={t('pages.xray.toggleIpVisibility')} onClick={() => setShowEgressIp(false)} onKeyDown={activateOnKey(() => setShowEgressIp(false))} />
               ) : (
-                <EyeInvisibleOutlined className="ip-toggle-icon" role="button" tabIndex={0} aria-label={t('pages.index.toggleIpVisibility')} onClick={() => setShowEgressIp(true)} onKeyDown={activateOnKey(() => setShowEgressIp(true))} />
+                <EyeInvisibleOutlined className="ip-toggle-icon" role="button" tabIndex={0} aria-label={t('pages.xray.toggleIpVisibility')} onClick={() => setShowEgressIp(true)} onKeyDown={activateOnKey(() => setShowEgressIp(true))} />
               )}
             </Tooltip>
           </span>
@@ -225,7 +225,7 @@ export function useOutboundColumns({
         },
       },
       {
-        title: t('pages.nodes.latency'),
+        title: t('pages.xray.latency'),
         key: 'testResult',
         align: 'left',
         width: 140,

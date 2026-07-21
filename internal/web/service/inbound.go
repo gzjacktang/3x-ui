@@ -851,9 +851,6 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		if err := s.clientService.SyncInbound(tx, inbound.Id, clients); err != nil {
 			return err
 		}
-		if _, err := database.CreateHostsFromExternalProxy(tx, inbound.Id, inbound.StreamSettings); err != nil {
-			return err
-		}
 		if inbound.NodeID != nil {
 			nodeID := *inbound.NodeID
 			if err := (&NodeService{}).EnsureInboundTagAllowedTx(tx, nodeID, inbound.Tag); err != nil {
@@ -966,9 +963,6 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 			return err
 		}
 		if err := tx.Delete(model.Inbound{}, id).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("inbound_id = ?", id).Delete(&model.Host{}).Error; err != nil {
 			return err
 		}
 		if loadErr == nil && ib.NodeID != nil {

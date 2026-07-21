@@ -57,7 +57,7 @@ func TestPrepareSQLiteForMigration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("sql db: %v", err)
 		}
-		for _, table := range []string{"client_groups", "client_global_traffics", "outbound_subscriptions"} {
+		for _, table := range []string{"client_global_traffics"} {
 			if !sqliteTableExists(sqlDB, table) {
 				t.Errorf("table %s was not created by the schema upgrade", table)
 			}

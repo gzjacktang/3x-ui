@@ -58,9 +58,6 @@ func TestLdapCreateClients_AttachesToAllConfiguredInbounds(t *testing.T) {
 	if err := db.Where("email = ?", email).First(rec).Error; err != nil {
 		t.Fatalf("client record for %s not created: %v", email, err)
 	}
-	if rec.SubID == "" {
-		t.Error("created LDAP client must carry a subId")
-	}
 
 	clientSvc := &service.ClientService{}
 	for i, id := range inboundIds {
@@ -70,9 +67,6 @@ func TestLdapCreateClients_AttachesToAllConfiguredInbounds(t *testing.T) {
 		}
 		if len(clients) != 1 || clients[0].Email != email {
 			t.Fatalf("inbound %s must carry exactly the LDAP client, got %d clients", tags[i], len(clients))
-		}
-		if clients[0].SubID != rec.SubID {
-			t.Errorf("inbound %s client subId = %q, want the shared %q", tags[i], clients[0].SubID, rec.SubID)
 		}
 	}
 

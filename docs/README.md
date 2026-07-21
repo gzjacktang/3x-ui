@@ -42,8 +42,8 @@ browser.
 The documentation walks you through 3x-ui from first install to day-to-day operation:
 
 - **Getting Started** — installation, first login, and updating or uninstalling the panel.
-- **Configuration** — the panel, inbounds, REALITY, transports, clients, subscriptions, and share links.
-- **Operations** — reverse proxy, multi-node setups, outbounds & routing, backup/restore, the Telegram bot, and security.
+- **Configuration** — the panel, inbounds, REALITY, transports, clients, and share links.
+- **Operations** — reverse proxy, outbounds and routing, backup/restore, and security.
 - **Reference** — environment variables, the database, ports & firewall, and the HTTP API.
 - **Help** — troubleshooting, FAQ, migration, and how to contribute.
 

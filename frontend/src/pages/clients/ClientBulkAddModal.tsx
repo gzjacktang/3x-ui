@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AutoComplete, Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Tooltip, message } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { Form, Input, InputNumber, Modal, Select, Switch, Tooltip, message } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
@@ -28,8 +27,6 @@ const EMPTY: ClientBulkAddFormValues = {
   emailPrefix: '',
   emailPostfix: '',
   quantity: 1,
-  subId: '',
-  group: '',
   comment: '',
   flow: '',
   limitIp: 0,
@@ -42,7 +39,6 @@ const EMPTY: ClientBulkAddFormValues = {
 interface ClientBulkAddModalProps {
   open: boolean;
   inbounds: InboundOption[];
-  groups?: string[];
   onOpenChange: (open: boolean) => void;
   onSaved?: () => void;
 }
@@ -50,7 +46,6 @@ interface ClientBulkAddModalProps {
 export default function ClientBulkAddModal({
   open,
   inbounds,
-  groups = [],
   onOpenChange,
   onSaved,
 }: ClientBulkAddModalProps) {
@@ -64,7 +59,6 @@ export default function ClientBulkAddModal({
   const firstNum = useWatch({ control: methods.control, name: 'firstNum' });
   const flow = useWatch({ control: methods.control, name: 'flow' });
   const expiryTime = useWatch({ control: methods.control, name: 'expiryTime' });
-  const subId = useWatch({ control: methods.control, name: 'subId' });
   const limitIp = useWatch({ control: methods.control, name: 'limitIp' });
   const [delayedStart, setDelayedStart] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -165,7 +159,6 @@ export default function ClientBulkAddModal({
       const payloads = emails.map((email) => ({
         client: {
           email,
-          subId: current.subId || RandomUtil.randomLowerAndNum(16),
           id: RandomUtil.randomUUID(),
           password: ss2022Method
             ? RandomUtil.randomShadowsocksPassword(ss2022Method)
@@ -176,7 +169,6 @@ export default function ClientBulkAddModal({
           expiryTime: current.expiryTime,
           reset: Number(current.reset) || 0,
           limitIp: Number(current.limitIp) || 0,
-          group: current.group,
           comment: current.comment,
           enable: true,
         },
@@ -272,34 +264,6 @@ export default function ClientBulkAddModal({
                 <InputNumber min={1} max={1000} />
               </FormField>
             )}
-
-            <Form.Item label={t('pages.clients.subId')}>
-              <Space.Compact style={{ display: 'flex' }}>
-                <Input
-                  value={subId}
-                  onChange={(e) => methods.setValue('subId', e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <Button
-                  aria-label={t('regenerate')}
-                  icon={<ReloadOutlined />}
-                  onClick={() => methods.setValue('subId', RandomUtil.randomLowerAndNum(16))}
-                />
-              </Space.Compact>
-            </Form.Item>
-
-            <FormField
-              name="group"
-              label={t('pages.clients.group')}
-              tooltip={t('pages.clients.groupDesc')}
-              transform={{ output: (v) => v ?? '' }}
-            >
-              <AutoComplete
-                placeholder={t('pages.clients.groupPlaceholder')}
-                options={groups.map((g) => ({ value: g }))}
-                allowClear
-              />
-            </FormField>
 
             <FormField name="comment" label={t('comment')}>
               <Input />

@@ -35,21 +35,11 @@ import { DefaultsPayloadSchema } from '@/schemas/defaults';
 import { TRAFFIC_POLL_INTERVAL_S } from '@/lib/traffic/poll-interval';
 
 // One row sent to POST /clients/:email/externalLinks.
-export type ExternalLinkInput = { kind: 'link' | 'subscription'; value: string; remark: string };
+export type ExternalLinkInput = { kind: 'link'; value: string; remark: string };
 
 export type { ClientRecord, ClientTraffic, ClientsSummary, InboundOption, ExternalLink };
 
 const JSON_HEADERS = { headers: { 'Content-Type': 'application/json' } } as const;
-
-interface SubSettings {
-  enable: boolean;
-  subURI: string;
-  subJsonURI: string;
-  subJsonEnable: boolean;
-  subClashURI: string;
-  subClashEnable: boolean;
-  publicHost: string;
-}
 
 export interface ClientQueryParams {
   page: number;
@@ -66,9 +56,7 @@ export interface ClientQueryParams {
   usageFrom?: number;
   usageTo?: number;
   autoRenew?: 'on' | 'off' | '';
-  hasTgId?: 'yes' | 'no' | '';
   hasComment?: 'yes' | 'no' | '';
-  group?: string;
 }
 
 const DEFAULT_QUERY: ClientQueryParams = { page: 1, pageSize: 25 };
@@ -132,9 +120,7 @@ function buildQS(p: ClientQueryParams): string {
   if (p.usageFrom && p.usageFrom > 0) sp.set('usageFrom', String(p.usageFrom));
   if (p.usageTo && p.usageTo > 0) sp.set('usageTo', String(p.usageTo));
   if (p.autoRenew) sp.set('autoRenew', p.autoRenew);
-  if (p.hasTgId) sp.set('hasTgId', p.hasTgId);
   if (p.hasComment) sp.set('hasComment', p.hasComment);
-  if (p.group) sp.set('group', p.group);
   return sp.toString();
 }
 
@@ -184,9 +170,7 @@ export function useClients() {
         && (prev.usageFrom ?? 0) === (next.usageFrom ?? 0)
         && (prev.usageTo ?? 0) === (next.usageTo ?? 0)
         && (prev.autoRenew ?? '') === (next.autoRenew ?? '')
-        && (prev.hasTgId ?? '') === (next.hasTgId ?? '')
         && (prev.hasComment ?? '') === (next.hasComment ?? '')
-        && (prev.group ?? '') === (next.group ?? '')
       ) return prev;
       return next;
     });
@@ -228,7 +212,6 @@ export function useClients() {
   const clients = listQuery.data?.items ?? [];
   const total = listQuery.data?.total ?? 0;
   const filtered = listQuery.data?.filtered ?? 0;
-  const allGroups = listQuery.data?.groups ?? [];
   const fetched = listQuery.data !== undefined || listQuery.isError;
   const fetchError = listQuery.error ? (listQuery.error as Error).message : '';
   const loading = listQuery.isFetching;
@@ -240,27 +223,7 @@ export function useClients() {
   const onlines = useMemo(() => onlinesQuery.data ?? [], [onlinesQuery.data]);
 
   const defaults = defaultsQuery.data ?? {};
-  const subSettings: SubSettings = useMemo(() => ({
-    enable: !!defaults.subEnable,
-    subURI: (defaults.subURI as string) || '',
-    subJsonURI: (defaults.subJsonURI as string) || '',
-    subJsonEnable: !!defaults.subJsonEnable,
-    subClashURI: (defaults.subClashURI as string) || '',
-    subClashEnable: !!defaults.subClashEnable,
-    publicHost: (defaults.subDomain as string) || (defaults.webDomain as string) || '',
-  }), [
-    defaults.subEnable,
-    defaults.subURI,
-    defaults.subJsonURI,
-    defaults.subJsonEnable,
-    defaults.subClashURI,
-    defaults.subClashEnable,
-    defaults.subDomain,
-    defaults.webDomain,
-  ]);
-
   const ipLimitEnable = !!defaults.ipLimitEnable;
-  const tgBotEnable = !!defaults.tgBotEnable;
   const expireDiff = ((defaults.expireDiff as number) ?? 0) * 86400000;
   const trafficDiff = ((defaults.trafficDiff as number) ?? 0) * 1073741824;
   const pageSize = (defaults.pageSize as number) ?? 0;
@@ -306,18 +269,6 @@ export function useClients() {
   const createMut = useMutation({
     mutationFn: (payload: unknown) =>
       HttpUtil.post('/panel/api/clients/add', payload, JSON_HEADERS),
-    onSuccess: (msg) => { if (msg?.success) invalidateAll(); },
-  });
-
-  const bulkAddToGroupMut = useMutation({
-    mutationFn: (body: { emails: string[]; group: string }) =>
-      HttpUtil.post('/panel/api/clients/groups/bulkAdd', body, JSON_HEADERS),
-    onSuccess: (msg) => { if (msg?.success) invalidateAll(); },
-  });
-
-  const bulkRemoveFromGroupMut = useMutation({
-    mutationFn: (body: { emails: string[] }) =>
-      HttpUtil.post('/panel/api/clients/groups/bulkRemove', body, JSON_HEADERS),
     onSuccess: (msg) => { if (msg?.success) invalidateAll(); },
   });
 
@@ -469,14 +420,6 @@ export function useClients() {
     if (!Array.isArray(emails) || emails.length === 0) return Promise.resolve(null as unknown as Msg<BulkSetEnableResult>);
     return bulkSetEnableMut.mutateAsync({ emails, enable: false });
   }, [bulkSetEnableMut]);
-  const bulkAddToGroup = useCallback((emails: string[], group: string) => {
-    if (!Array.isArray(emails) || emails.length === 0) return Promise.resolve(null);
-    return bulkAddToGroupMut.mutateAsync({ emails, group });
-  }, [bulkAddToGroupMut]);
-  const bulkRemoveFromGroup = useCallback((emails: string[]) => {
-    if (!Array.isArray(emails) || emails.length === 0) return Promise.resolve(null);
-    return bulkRemoveFromGroupMut.mutateAsync({ emails });
-  }, [bulkRemoveFromGroupMut]);
   const attach = useCallback((email: string, inboundIds: number[]) => {
     if (!email) return Promise.resolve(null as unknown as Msg<unknown>);
     return attachMut.mutateAsync({ email, inboundIds });
@@ -522,7 +465,6 @@ export function useClients() {
     if (!base) return null;
     const payload: Record<string, unknown> = {
       email: base.email,
-      subId: base.subId,
       id: base.uuid,
       password: base.password,
       auth: base.auth,
@@ -531,9 +473,7 @@ export function useClients() {
       totalGB: base.totalGB || 0,
       expiryTime: base.expiryTime || 0,
       limitIp: base.limitIp || 0,
-      tgId: Number(base.tgId) || 0,
       reset: Number(base.reset) || 0,
-      group: base.group || '',
       comment: base.comment || '',
       enable: !!enable,
     };
@@ -611,7 +551,6 @@ export function useClients() {
     total,
     filtered,
     summary,
-    allGroups,
     hydrate,
     query,
     setQuery,
@@ -621,9 +560,7 @@ export function useClients() {
     transitioning,
     fetched,
     fetchError,
-    subSettings,
     ipLimitEnable,
-    tgBotEnable,
     expireDiff,
     trafficDiff,
     pageSize,
@@ -636,8 +573,6 @@ export function useClients() {
     bulkAdjust,
     bulkEnable,
     bulkDisable,
-    bulkAddToGroup,
-    bulkRemoveFromGroup,
     attach,
     setExternalLinks,
     bulkAttach,

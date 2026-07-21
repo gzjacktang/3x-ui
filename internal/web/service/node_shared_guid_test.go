@@ -87,46 +87,6 @@ func TestEffectiveNodeKey_FallsBackOnCollision(t *testing.T) {
 	}
 }
 
-// recountByGuid must split per-node counts even when two direct nodes share a
-// GUID and their inbounds still carry that shared GUID as origin (pre-backfill).
-func TestRecountByGuid_SplitsClonedNodesWithSharedGuid(t *testing.T) {
-	setupConflictDB(t)
-	db := database.GetDB()
-	svc := NodeService{}
-	selfGuid, _ := (&SettingService{}).GetPanelGuid()
-
-	n1 := &model.Node{Id: 1, Name: "A", Address: "10.0.0.1", Port: 2053, ApiToken: "t", Guid: "dup", Status: "online"}
-	n2 := &model.Node{Id: 2, Name: "B", Address: "10.0.0.2", Port: 2053, ApiToken: "t", Guid: "dup", Status: "online"}
-	n3 := &model.Node{Id: 3, Name: "C", Address: "10.0.0.3", Port: 2053, ApiToken: "t", Guid: "uniq", Status: "online"}
-	for _, n := range []*model.Node{n1, n2, n3} {
-		if err := db.Create(n).Error; err != nil {
-			t.Fatalf("create node %s: %v", n.Name, err)
-		}
-	}
-
-	id1, id2, id3 := 1, 2, 3
-	inbounds := []*model.Inbound{
-		{Tag: "a", Port: 1001, Protocol: model.VLESS, Settings: `{"clients":[]}`, Enable: true, NodeID: &id1, OriginNodeGuid: "dup"},
-		{Tag: "b", Port: 1002, Protocol: model.VLESS, Settings: `{"clients":[]}`, Enable: true, NodeID: &id2, OriginNodeGuid: "dup"},
-		{Tag: "c", Port: 1003, Protocol: model.VLESS, Settings: `{"clients":[]}`, Enable: true, NodeID: &id3, OriginNodeGuid: "uniq"},
-	}
-	for _, ib := range inbounds {
-		if err := db.Create(ib).Error; err != nil {
-			t.Fatalf("create inbound %s: %v", ib.Tag, err)
-		}
-	}
-
-	nodes := []*model.Node{n1, n2, n3}
-	svc.recountByGuid(nodes, selfGuid)
-
-	if n1.InboundCount != 1 || n2.InboundCount != 1 {
-		t.Errorf("cloned nodes must not share inbound counts: n1=%d n2=%d, want 1,1", n1.InboundCount, n2.InboundCount)
-	}
-	if n3.InboundCount != 1 {
-		t.Errorf("unique node InboundCount = %d, want 1", n3.InboundCount)
-	}
-}
-
 // A cloned node's IP-attribution subtree must be stored under its node-unique
 // key, so a second clone sharing the GUID can't overwrite it in node_client_ips.
 func TestMergeClientIpsByGuid_RemapsClonedNodeSubtree(t *testing.T) {

@@ -18,7 +18,6 @@ import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 
 import type { InboundOption } from '@/hooks/useClients';
-import type { NodeRecord } from '@/schemas/node';
 import { formatInboundLabel } from '@/lib/inbounds/label';
 import { emptyFilters, type ClientFilters } from './filters';
 
@@ -29,8 +28,6 @@ interface FilterDrawerProps {
   onChange: (next: ClientFilters) => void;
   inbounds: InboundOption[];
   protocols: string[];
-  groups: string[];
-  nodes: NodeRecord[];
 }
 
 const BUCKET_KEYS = ['active', 'expiring', 'depleted', 'deactive', 'online'] as const;
@@ -42,8 +39,6 @@ export default function FilterDrawer({
   onChange,
   inbounds,
   protocols,
-  groups,
-  nodes,
 }: FilterDrawerProps) {
   const { t } = useTranslation();
 
@@ -62,21 +57,6 @@ export default function FilterDrawer({
   const protocolOptions = useMemo(
     () => protocols.map((p) => ({ value: p, label: p })),
     [protocols],
-  );
-
-  const groupOptions = useMemo(
-    () => groups.map((g) => ({ value: g, label: g })),
-    [groups],
-  );
-
-  // 0 is the "local panel" sentinel (inbounds without a nodeId) — see
-  // ClientFilters.nodeIds (#4997).
-  const nodeOptions = useMemo(
-    () => [
-      { value: 0, label: t('pages.clients.filters.localPanel') },
-      ...nodes.map((n) => ({ value: n.id, label: n.name || `#${n.id}` })),
-    ],
-    [nodes, t],
   );
 
   const dateRange: [Dayjs | null, Dayjs | null] = [
@@ -144,36 +124,6 @@ export default function FilterDrawer({
           />
         </Form.Item>
 
-        {nodes.length > 0 && (
-          <Form.Item label={t('pages.clients.filters.nodes')}>
-            <Select
-              mode="multiple"
-              value={filters.nodeIds}
-              onChange={(v) => patch('nodeIds', v as number[])}
-              options={nodeOptions}
-              placeholder={t('pages.clients.filters.nodes')}
-              maxTagCount="responsive"
-              allowClear
-              showSearch={{ optionFilterProp: 'label' }}
-              listHeight={220}
-            />
-          </Form.Item>
-        )}
-
-        <Form.Item label={t('pages.clients.group')}>
-          <Select
-            mode="multiple"
-            value={filters.groups}
-            onChange={(v) => patch('groups', v as string[])}
-            options={groupOptions}
-            placeholder={t('pages.clients.groupPlaceholder')}
-            maxTagCount="responsive"
-            allowClear
-            showSearch={{ optionFilterProp: 'label' }}
-            listHeight={220}
-          />
-        </Form.Item>
-
         <Form.Item label={t('pages.clients.expiryTime')}>
           <DatePicker.RangePicker
             value={dateRange}
@@ -226,20 +176,6 @@ export default function FilterDrawer({
           />
         </Form.Item>
 
-        <Form.Item label={t('pages.clients.telegramId')}>
-          <Radio.Group
-            value={filters.hasTgId}
-            onChange={(e) => patch('hasTgId', e.target.value)}
-            optionType="button"
-            buttonStyle="solid"
-            options={[
-              { value: '', label: t('all') },
-              { value: 'yes', label: t('pages.clients.has') },
-              { value: 'no', label: t('pages.clients.hasNot') },
-            ]}
-          />
-        </Form.Item>
-
         <Form.Item label={t('pages.clients.comment')}>
           <Radio.Group
             value={filters.hasComment}
@@ -260,7 +196,7 @@ export default function FilterDrawer({
 
 function bucketLabel(key: string, t: (k: string) => string): string {
   switch (key) {
-    case 'active': return t('subscription.active');
+    case 'active': return t('enabled');
     case 'expiring': return t('depletingSoon');
     case 'depleted': return t('depleted');
     case 'deactive': return t('disabled');

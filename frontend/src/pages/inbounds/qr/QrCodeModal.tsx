@@ -13,11 +13,9 @@ import {
 } from '@/lib/xray/inbound-link';
 import { inboundFromDb, type DbInboundLike } from '@/lib/xray/inbound-from-db';
 import QrPanel from './QrPanel';
-import type { SubSettings } from '../useInbounds';
 
 interface ClientSetting {
   email?: string;
-  subId?: string;
   [k: string]: unknown;
 }
 
@@ -27,7 +25,7 @@ interface QrCodeModalProps {
   dbInbound: (DbInboundLike & { remark?: string }) | null;
   client?: ClientSetting | null;
   nodeAddress?: string;
-  subSettings?: SubSettings;
+  publicHost?: string;
 }
 
 interface QrItem {
@@ -44,20 +42,18 @@ export default function QrCodeModal({
   dbInbound,
   client = null,
   nodeAddress = '',
-  subSettings,
+  publicHost = '',
 }: QrCodeModalProps) {
   const { t } = useTranslation();
   const [links, setLinks] = useState<{ remark?: string; link: string }[]>([]);
   const [wireguardConfigs, setWireguardConfigs] = useState<string[]>([]);
   const [wireguardLinks, setWireguardLinks] = useState<string[]>([]);
-  const [subLink, setSubLink] = useState('');
-  const [subJsonLink, setSubJsonLink] = useState('');
   const [activeKey, setActiveKey] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open || !dbInbound) return;
     const inbound = inboundFromDb(dbInbound);
-    const fallbackHostname = preferPublicHost(window.location.hostname, subSettings?.publicHost ?? '');
+    const fallbackHostname = preferPublicHost(window.location.hostname, publicHost);
     if (inbound.protocol === Protocols.WIREGUARD) {
       const peerRemark = client?.email
         ? `${dbInbound.remark}-${client.email}`
@@ -93,25 +89,10 @@ export default function QrCodeModal({
       setWireguardLinks([]);
     }
 
-    const subId = client?.subId;
-    let nextSub = '';
-    let nextSubJson = '';
-    if (subSettings?.enable && subId) {
-      nextSub = (subSettings.subURI || '') + subId;
-      nextSubJson = subSettings.subJsonEnable ? (subSettings.subJsonURI || '') + subId : '';
-    }
-    setSubLink(nextSub);
-    setSubJsonLink(nextSubJson);
-  }, [open, dbInbound, client, nodeAddress, subSettings]);
+  }, [open, dbInbound, client, nodeAddress, publicHost]);
 
   const qrItems = useMemo<QrItem[]>(() => {
     const items: QrItem[] = [];
-    if (subLink) {
-      items.push({ key: 'sub', header: t('subscription.title'), value: subLink });
-    }
-    if (subJsonLink) {
-      items.push({ key: 'sub-json', header: `${t('subscription.title')} (JSON)`, value: subJsonLink });
-    }
     links.forEach((link, idx) => {
       items.push({ key: `l${idx}`, header: link.remark || `Link ${idx + 1}`, value: link.link });
     });
@@ -127,7 +108,7 @@ export default function QrCodeModal({
       }
     });
     return items;
-  }, [subLink, subJsonLink, links, wireguardConfigs, wireguardLinks, t]);
+  }, [links, wireguardConfigs, wireguardLinks]);
 
   const collapseItems: CollapseProps['items'] = useMemo(
     () => qrItems.map((item) => ({

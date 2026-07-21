@@ -137,13 +137,12 @@ The panel UI is a **React 19 + Ant Design 6 + TypeScript** app under `frontend/`
 
 ### Architecture
 
-The frontend ships **three Vite bundles**, each emitted into `internal/web/dist/` and embedded into the Go binary at compile time via `embed.FS`:
+The frontend ships **two Vite bundles**, each emitted into `internal/web/dist/` and embedded into the Go binary at compile time via `embed.FS`:
 
-- **`index.html`** — the admin panel, a **single-page app**. `src/main.tsx` mounts a `react-router` `createBrowserRouter` (see `src/routes.tsx`) under the `/panel` basename; every route (`/panel`, `/panel/inbounds`, `/panel/clients`, `/panel/groups`, `/panel/nodes`, `/panel/settings`, `/panel/xray`, `/panel/api-docs`) is lazy-loaded inside a shared `PanelLayout` (sidebar + header + `<Outlet>`).
+- **`index.html`** — the admin panel, a **single-page app**. `src/main.tsx` mounts a `react-router` `createBrowserRouter` (see `src/routes.tsx`) under the `/panel` basename; the inbound, client, outbound, routing, settings, and Xray routes are lazy-loaded inside a shared `PanelLayout` (sidebar + header + `<Outlet>`).
 - **`login.html`** — the login + 2FA screen (`src/entries/login.tsx`), a standalone bundle.
-- **`subpage.html`** — the public subscription viewer (`src/entries/subpage.tsx`), a standalone bundle.
 
-Panel navigation happens client-side through React Router, and per-route code is lazy-split so the initial panel load stays small. `login` and `subpage` stay separate documents because they are reached without an authenticated panel session.
+Panel navigation happens client-side through React Router, and per-route code is lazy-split so the initial panel load stays small. `login` stays a separate document because it is reached without an authenticated panel session.
 
 ### State and data flow
 
@@ -177,7 +176,7 @@ Most new screens are **admin-panel routes** and need no new HTML or Vite entry:
 2. Register it in `src/routes.tsx` under the `/panel` tree (lazy-import it like the others).
 3. Add a sidebar link in `src/layouts/AppSidebar.tsx` if it should be reachable from the nav.
 
-Only a genuinely **standalone bundle** (like `login` or `subpage`, reachable without the panel shell) needs the full entry treatment: add `frontend/<page>.html`, a `src/entries/<page>.tsx` bootstrap, register it in `rollupOptions.input` inside `vite.config.js`, and wire a Go controller route that calls `serveDistPage(c, "<page>.html")` to serve the embedded HTML in production.
+Only a genuinely **standalone bundle** (like `login`, reachable without the panel shell) needs the full entry treatment: add `frontend/<page>.html`, a `src/entries/<page>.tsx` bootstrap, register it in `rollupOptions.input` inside `vite.config.js`, and wire a Go controller route that calls `serveDistPage(c, "<page>.html")` to serve the embedded HTML in production.
 
 ### Conventions
 
@@ -187,7 +186,7 @@ Only a genuinely **standalone bundle** (like `login` or `subpage`, reachable wit
 - **No `//` line comments** in committed JS/TS/Vue/Go. HTML `<!-- ... -->` is fine for template structure. Names should carry the meaning; rename rather than annotate. Comments are reserved for the *why*, and only when the reason is surprising.
 - **Persian and Arabic users are first-class.** When writing Persian text in toasts or labels, isolate code identifiers on their own lines so RTL reading flows. (Full RTL layout is not currently wired through AntD `ConfigProvider direction` — only the Jalali date picker is RTL-aware — so treat RTL as an open area, not a solved one.)
 - **Schemas over `any`.** New config shapes go in `src/schemas/`; `@typescript-eslint/no-explicit-any` is an error and production schemas use no `.loose()`. Validate form fields with `antdRule(Schema.shape.field, t)` rather than inline `z.string()` in rules.
-- **Document new endpoints.** Every new `g.POST`/`g.GET` in `internal/web/controller/` needs a matching entry in `src/pages/api-docs/endpoints.ts` — it drives both the in-panel API docs and the generated OpenAPI/Zod (`npm run gen:api` / `gen:zod`).
+- **Keep generated contracts current.** Changes to Go request or response entities must be followed by `npm run gen:zod` and a review of `src/generated/`.
 - **Do not break link generation.** Share-link logic lives in `src/lib/xray/` (`inbound-link.ts`, `outbound-link-parser.ts`, …) and is round-tripped by the golden fixture suite — run `npm run test` after any change to URL generation, defaults, or TLS/Reality handling, and regenerate snapshots (`npx vitest run -u`) only for intentional changes. Two runtime paths consume it: the **inbounds page** and the **clients page** subscription links (`/panel/api/clients/subLinks/:subId` → backend `GetSubs`); exercise both.
 - **Vite is pinned to an exact version** (no `^`) in `frontend/package.json` — read the live version there rather than trusting a number quoted here — so local, CI, and release builds resolve identically. Bump it deliberately and verify both `npm run dev` and `npm run build` afterward.
 - **Reusable components are documented in Storybook.** When you add or change a component in `frontend/src/components/`, add or update its co-located `<Component>.stories.tsx` (`tags: ['autodocs']`), documenting props via `argTypes` / `parameters.docs` string metadata rather than JSDoc. CI compile-checks every story via `npm run build-storybook` and runs each story as a headless-browser test via `@storybook/addon-vitest` (`npm run test`, needs `npx playwright install chromium`); run `npm run storybook` to preview locally.
@@ -198,18 +197,16 @@ Only a genuinely **standalone bundle** (like `login` or `subpage`, reachable wit
 frontend/
 ├── index.html             — admin panel SPA entry
 ├── login.html             — login + 2FA entry
-├── subpage.html           — public subscription viewer entry
 ├── tsconfig.json          — strict, jsx: "react-jsx", paths "@/*" → "src/*"
 ├── eslint.config.js       — ESLint flat config (@eslint/js + typescript-eslint + react-hooks)
 ├── vite.config.js
 ├── vitest.config.ts
-├── scripts/               — build-openapi.mjs (endpoints.ts → openapi.json)
 └── src/
     ├── main.tsx           — admin SPA bootstrap (router + providers)
     ├── routes.tsx         — react-router routes mounted under /panel
-    ├── entries/           — bootstrap for the standalone bundles (login, subpage)
+    ├── entries/           — bootstrap for standalone bundles such as login
     ├── layouts/           — PanelLayout + AppSidebar
-    ├── pages/             — one folder per route (index, inbounds, clients, groups, nodes, settings, xray, api-docs) plus login, sub
+    ├── pages/             — retained panel routes plus the login page
     ├── components/        — cross-page React components
     ├── hooks/             — reusable hooks (useTheme, useWebSocket, useClients, useDatepicker, …)
     ├── api/               — fetch client + CSRF handling, TanStack Query provider/keys, WebSocket client

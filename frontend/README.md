@@ -1,9 +1,8 @@
 # 3x-ui frontend
 
-React 19 + Ant Design 6 + TypeScript + Vite 8. Three SPA bundles —
+React 19 + Ant Design 6 + TypeScript + Vite 8. Two SPA bundles —
 `index.html` (admin panel SPA, all `/panel/*` routes), `login.html`
-(login + 2FA), and `subpage.html` (public subscription viewer). All
-three are built into `../internal/web/dist/` and embedded into the Go binary
+(login + 2FA). Both are built into `../internal/web/dist/` and embedded into the Go binary
 via `embed.FS`.
 
 State is split between local `useState`, TanStack Query for server
@@ -30,7 +29,7 @@ production-style links work without round-tripping through Go.
 | Command | What |
 |---|---|
 | `npm run dev` | Vite dev server with API + WS proxy to Go |
-| `npm run build` | Regenerates OpenAPI + Zod, then builds into `../internal/web/dist/` |
+| `npm run build` | Build the production bundles into `../internal/web/dist/` |
 | `npm run preview` | Serve the built bundle locally |
 | `npm run typecheck` | `tsc --noEmit` (strict, no emit) |
 | `npm run lint` | ESLint flat config (`@typescript-eslint` + `react-hooks`) |
@@ -38,7 +37,6 @@ production-style links work without round-tripping through Go.
 | `npm run test:watch` | Vitest watch mode |
 | `npm run storybook` | Storybook dev server on `:6006` (component workbench + autodocs) |
 | `npm run build-storybook` | Static Storybook build — CI compile-checks every story |
-| `npm run gen:api` | Build `public/openapi.json` from `pages/api-docs/endpoints.ts` |
 | `npm run gen:zod` | Run the Go-side openapigen tool → `src/generated/{zod,types}.ts` |
 
 CI runs `typecheck`, `lint`, `test`, `build`, and `build-storybook` on
@@ -74,7 +72,7 @@ time and `internal/web/controller/dist.go` serves the per-page HTML.
 
 ```
 frontend/
-├── index.html, login.html, subpage.html  # 3 Vite entries
+├── index.html, login.html  # 2 Vite entries
 ├── tsconfig.json
 ├── eslint.config.js
 ├── eslint.deprecated.config.js           # On-demand type-aware lint config that flags
@@ -82,15 +80,12 @@ frontend/
 ├── vitest.config.ts
 ├── vite.config.js
 ├── .storybook/                           # Storybook config (main.ts, preview.tsx)
-├── scripts/
-│   └── build-openapi.mjs                 # endpoints.ts → openapi.json
 └── src/
     ├── entries/         # Per-page bootstrap (createRoot + render)
     ├── main.tsx         # Shared root for the admin SPA (index.html)
     ├── routes.tsx       # react-router routes mounted under /panel/
     ├── pages/           # One folder per route, page component + helpers
-    │   ├── index/, login/, inbounds/, clients/, xray/, nodes/,
-    │   ├── settings/, api-docs/, sub/
+    │   ├── login/, inbounds/, clients/, xray/, settings/
     ├── layouts/         # AdminLayout (sidebar + header + outlet)
     ├── components/      # Cross-page React components (+ co-located *.stories.tsx)
     ├── hooks/           # useClients, useTheme, useWebSocket, …

@@ -4,9 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/web/middleware"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/panel"
-	"github.com/mhsanaei/3x-ui/v3/internal/web/service/tgbot"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/middleware"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/session"
 
 	"github.com/gin-gonic/gin"
@@ -17,13 +16,10 @@ type APIController struct {
 	BaseController
 	inboundController     *InboundController
 	serverController      *ServerController
-	nodeController        *NodeController
-	hostController        *HostController
 	settingController     *SettingController
 	xraySettingController *XraySettingController
 	userService           panel.UserService
 	apiTokenService       panel.ApiTokenService
-	Tgbot                 tgbot.Tgbot
 }
 
 // NewAPIController creates a new APIController instance and initializes its routes.
@@ -73,9 +69,6 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 	// Main API group
 	api := g.Group("/panel/api")
 	api.Use(a.checkAPIAuth)
-	// Decode + verify the node config envelope (zstd + X-Config-Sha256) and
-	// advertise support, before CSRF/handlers read the body.
-	api.Use(middleware.ConfigEnvelopeMiddleware())
 	api.Use(middleware.CSRFMiddleware())
 
 	// Inbounds API
@@ -84,31 +77,14 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 
 	clients := api.Group("/clients")
 	NewClientController(clients)
-	NewGroupController(clients)
 
 	// Server API
 	server := api.Group("/server")
 	a.serverController = NewServerController(server)
-
-	// Nodes API — multi-panel management
-	nodes := api.Group("/nodes")
-	a.nodeController = NewNodeController(nodes)
-
-	// Hosts API — per-inbound override endpoints for subscription links
-	hosts := api.Group("/hosts")
-	a.hostController = NewHostController(hosts)
 
 	// Settings + Xray config management live under the API surface too, so the
 	// same API token drives them. Paths are /panel/api/setting/* and
 	// /panel/api/xray/*.
 	a.settingController = NewSettingController(api)
 	a.xraySettingController = NewXraySettingController(api)
-
-	// Extra routes
-	api.POST("/backuptotgbot", a.BackuptoTgbot)
-}
-
-// BackuptoTgbot sends a backup of the panel data to Telegram bot admins.
-func (a *APIController) BackuptoTgbot(c *gin.Context) {
-	a.Tgbot.SendBackupToAdmins()
 }

@@ -71,11 +71,6 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Candidates for the panel egress picker: template outbounds plus
-      // subscription-derived outbounds, and routing balancers. The panel egress
-      // is injected as a routing rule, so a balancer tag is a valid target
-      // (it load-balances the panel's own traffic). The geodata picker, by
-      // contrast, dials a forced tag and can only use a concrete outbound.
       const msg = await HttpUtil.post('/panel/api/xray/', undefined, { silent: true }) as ApiMsg<string>;
       if (cancelled || !msg?.success || typeof msg.obj !== 'string') return;
       try {
@@ -88,10 +83,6 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
           const rec = o as Record<string, unknown>;
           if (rec.protocol === 'blackhole') continue; // dropping traffic is never a useful egress
           const tag = rec.tag;
-          if (typeof tag === 'string' && tag) tags.add(tag);
-        }
-        const subTags = Array.isArray(payload.subscriptionOutboundTags) ? payload.subscriptionOutboundTags : [];
-        for (const tag of subTags) {
           if (typeof tag === 'string' && tag) tags.add(tag);
         }
         const balancerTags: string[] = [];

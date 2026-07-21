@@ -81,7 +81,7 @@ export default function FreedomFields() {
       {fragmentEnabled && (
         <>
           <FormField
-            label={t('pages.settings.subFormats.packets')}
+            label={t('pages.xray.fields.packets')}
             name={['settings', 'fragment', 'packets']}
             rules={{
               validate: (value) => {
@@ -101,19 +101,19 @@ export default function FreedomFields() {
               placeholder="tlshello or n-m, e.g. 1-3"
             />
           </FormField>
-          <FormField label={t('pages.settings.subFormats.length')} name={['settings', 'fragment', 'length']}>
+          <FormField label={t('pages.xray.fields.length')} name={['settings', 'fragment', 'length']}>
             <Input />
           </FormField>
-          <FormField label={t('pages.settings.subFormats.interval')} name={['settings', 'fragment', 'interval']}>
+          <FormField label={t('pages.xray.fields.interval')} name={['settings', 'fragment', 'interval']}>
             <Input />
           </FormField>
-          <FormField label={t('pages.settings.subFormats.maxSplit')} name={['settings', 'fragment', 'maxSplit']}>
+          <FormField label={t('pages.xray.fields.maxSplit')} name={['settings', 'fragment', 'maxSplit']}>
             <Input />
           </FormField>
         </>
       )}
 
-      <Form.Item label={t('pages.settings.subFormats.noises')}>
+      <Form.Item label={t('pages.xray.fields.noises')}>
         <Switch
           checked={noiseFields.length > 0}
           onChange={(checked) => {
@@ -139,7 +139,7 @@ export default function FreedomFields() {
         <div key={field.id}>
           <Form.Item wrapperCol={{ md: { span: 14, offset: 8 } }}>
             <div className="item-heading">
-              <span>{t('pages.settings.subFormats.noiseItem', { n: index + 1 })}</span>
+              <span>{t('pages.xray.fields.noiseItem', { n: index + 1 })}</span>
               {noiseFields.length > 1 && (
                 <DeleteOutlined
                   className="danger-icon"
@@ -152,7 +152,7 @@ export default function FreedomFields() {
               )}
             </div>
           </Form.Item>
-          <FormField label={t('pages.settings.subFormats.type')} name={['settings', 'noises', index, 'type']}>
+          <FormField label={t('pages.xray.fields.type')} name={['settings', 'noises', index, 'type']}>
             <Select
               options={['rand', 'base64', 'str', 'hex'].map((v) => ({
                 value: v,
@@ -160,13 +160,13 @@ export default function FreedomFields() {
               }))}
             />
           </FormField>
-          <FormField label={t('pages.settings.subFormats.packet')} name={['settings', 'noises', index, 'packet']}>
+          <FormField label={t('pages.xray.fields.packet')} name={['settings', 'noises', index, 'packet']}>
             <Input />
           </FormField>
-          <FormField label={t('pages.settings.subFormats.delayMs')} name={['settings', 'noises', index, 'delay']}>
+          <FormField label={t('pages.xray.fields.delayMs')} name={['settings', 'noises', index, 'delay']}>
             <Input />
           </FormField>
-          <FormField label={t('pages.settings.subFormats.applyTo')} name={['settings', 'noises', index, 'applyTo']}>
+          <FormField label={t('pages.xray.fields.applyTo')} name={['settings', 'noises', index, 'applyTo']}>
             <Select
               options={['ip', 'ipv4', 'ipv6'].map((v) => ({
                 value: v,

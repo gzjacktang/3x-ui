@@ -6,6 +6,7 @@ import { CopyOutlined, EyeOutlined, QrcodeOutlined, ReloadOutlined } from '@ant-
 import { ClipboardManager, HttpUtil, IntlUtil, SizeFormatter } from '@/utils';
 import { formatInboundLabel } from '@/lib/inbounds/label';
 import { normalizeClientIps, type ClientIpInfo } from '@/lib/clients/ip-log';
+import { loadClientShareLinks } from '@/lib/clients/share-links';
 import { useDatepicker } from '@/hooks/useDatepicker';
 import type { ClientRecord, InboundOption } from '@/hooks/useClients';
 import { isPostQuantumLink } from '@/lib/xray/inbound-link';
@@ -30,22 +31,11 @@ const INBOUND_PROTOCOL_COLORS: Record<string, string> = {
 
 const INBOUND_CHIP_LIMIT = 1;
 
-interface SubSettings {
-  enable: boolean;
-  subURI: string;
-  subJsonURI: string;
-  subJsonEnable: boolean;
-  subClashURI: string;
-  subClashEnable: boolean;
-  publicHost?: string;
-}
-
 interface ClientInfoModalProps {
   open: boolean;
   client: ClientRecord | null;
   inboundsById: Record<number, InboundOption>;
   isOnline: boolean;
-  subSettings?: SubSettings;
   onOpenChange: (open: boolean) => void;
 }
 
@@ -54,22 +44,11 @@ interface ApiMsg<T = unknown> {
   obj?: T;
 }
 
-const DEFAULT_SUB: SubSettings = {
-  enable: false,
-  subURI: '',
-  subJsonURI: '',
-  subJsonEnable: false,
-  subClashURI: '',
-  subClashEnable: false,
-  publicHost: '',
-};
-
 export default function ClientInfoModal({
   open,
   client,
   inboundsById,
   isOnline,
-  subSettings = DEFAULT_SUB,
   onOpenChange,
 }: ClientInfoModalProps) {
   const { datepicker } = useDatepicker();
@@ -97,17 +76,14 @@ export default function ClientInfoModal({
       setIpsModalOpen(false);
       return;
     }
-    if (!client?.subId) return;
+    if (!client) return;
     let cancelled = false;
     (async () => {
-      const msg = await HttpUtil.get(
-        `/panel/api/clients/subLinks/${encodeURIComponent(client.subId!)}`,
-      ) as ApiMsg<string[]>;
-      if (cancelled) return;
-      setLinks(msg?.success && Array.isArray(msg.obj) ? msg.obj : []);
+      const next = await loadClientShareLinks(client, inboundsById);
+      if (!cancelled) setLinks(next);
     })();
     return () => { cancelled = true; };
-  }, [open, client?.subId]);
+  }, [open, client, inboundsById]);
 
   const traffic = client?.traffic || null;
   const totalBytes = client?.totalGB || 0;
@@ -118,29 +94,11 @@ export default function ClientInfoModal({
     return r > 0 ? r : 0;
   }, [totalBytes, used]);
 
-  const subLink = useMemo(() => {
-    if (!client?.subId || !subSettings?.subURI) return '';
-    return subSettings.subURI + client.subId;
-  }, [client?.subId, subSettings?.subURI]);
-
-  const subJsonLink = useMemo(() => {
-    if (!client?.subId) return '';
-    if (!subSettings?.subJsonEnable || !subSettings?.subJsonURI) return '';
-    return subSettings.subJsonURI + client.subId;
-  }, [client?.subId, subSettings?.subJsonEnable, subSettings?.subJsonURI]);
-
-  const subClashLink = useMemo(() => {
-    if (!client?.subId) return '';
-    if (!subSettings?.subClashEnable || !subSettings?.subClashURI) return '';
-    return subSettings.subClashURI + client.subId;
-  }, [client?.subId, subSettings?.subClashEnable, subSettings?.subClashURI]);
-
-  const showSubscription = !!(subSettings?.enable && client?.subId);
   const wgInbound = useMemo(() => findWireguardInbound(client, inboundsById), [client, inboundsById]);
   const wgConfigText = useMemo(() => {
     if (!client || !wgInbound || !isWireguardClient(client)) return '';
-    return buildWireguardClientConfig(client, wgInbound, window.location.hostname, subSettings?.publicHost ?? '');
-  }, [client, wgInbound, subSettings?.publicHost]);
+    return buildWireguardClientConfig(client, wgInbound, window.location.hostname, '');
+  }, [client, wgInbound]);
 
   async function copyValue(text: string) {
     if (!text) return;
@@ -213,15 +171,6 @@ export default function ClientInfoModal({
                     {client.email
                       ? <Tag color="green">{client.email}</Tag>
                       : <Tag color="red">{t('none')}</Tag>}
-                  </td>
-                </tr>
-                <tr>
-                  <td>{t('pages.clients.subId')}</td>
-                  <td>
-                    <Tag className="info-large-tag">{client.subId || '-'}</Tag>
-                    {client.subId && (
-                      <Button size="small" type="text" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(client.subId!)} />
-                    )}
                   </td>
                 </tr>
                 {client.uuid && (
@@ -308,12 +257,6 @@ export default function ClientInfoModal({
                   <td>{t('pages.inbounds.updatedAt')}</td>
                   <td><Tag>{dateLabel(client.updatedAt)}</Tag></td>
                 </tr>
-                {client.group && (
-                  <tr>
-                    <td>{t('pages.clients.group')}</td>
-                    <td><Tag color="geekblue">{client.group}</Tag></td>
-                  </tr>
-                )}
                 {client.comment && (
                   <tr>
                     <td>{t('pages.clients.comment')}</td>
@@ -364,99 +307,6 @@ export default function ClientInfoModal({
                 </tr>
               </tbody>
             </table>
-
-            {showSubscription && subLink && (
-              <>
-                <Divider>{t('subscription.title')}</Divider>
-                <div className="link-row">
-                  <Tag color="green" className="link-row-tag">SUB</Tag>
-                  <a
-                    href={subLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="link-row-title link-row-title-anchor"
-                    title={subLink}
-                  >
-                    {client.subId}
-                  </a>
-                  <div className="link-row-actions">
-                    <Tooltip title={t('copy')}>
-                      <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(subLink)} />
-                    </Tooltip>
-                    <Popover
-                      trigger="click"
-                      placement="left"
-                      destroyOnHidden
-                      content={<QrPanel value={subLink} remark={`${client.email} — ${t('subscription.title')}`} size={220} />}
-                    >
-                      <Tooltip title={t('pages.clients.qrCode')}>
-                        <Button size="small" icon={<QrcodeOutlined />} aria-label={t('pages.clients.qrCode')} />
-                      </Tooltip>
-                    </Popover>
-                  </div>
-                </div>
-                {subJsonLink && (
-                  <div className="link-row">
-                    <Tag color="purple" className="link-row-tag">JSON</Tag>
-                    <a
-                      href={subJsonLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="link-row-title link-row-title-anchor"
-                      title={subJsonLink}
-                    >
-                      {client.subId}
-                    </a>
-                    <div className="link-row-actions">
-                      <Tooltip title={t('copy')}>
-                        <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(subJsonLink)} />
-                      </Tooltip>
-                      <Popover
-                        trigger="click"
-                        placement="left"
-                        destroyOnHidden
-                        content={<QrPanel value={subJsonLink} remark={`${client.email} — JSON`} size={220} />}
-                      >
-                        <Tooltip title={t('pages.clients.qrCode')}>
-                          <Button size="small" icon={<QrcodeOutlined />} aria-label={t('pages.clients.qrCode')} />
-                        </Tooltip>
-                      </Popover>
-                    </div>
-                  </div>
-                )}
-                {subClashLink && (
-                  <div className="link-row">
-                    <Tooltip title="Clash / Mihomo">
-                      <Tag color="gold" className="link-row-tag">CLASH</Tag>
-                    </Tooltip>
-                    <a
-                      href={subClashLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="link-row-title link-row-title-anchor"
-                      title={subClashLink}
-                    >
-                      {client.subId}
-                    </a>
-                    <div className="link-row-actions">
-                      <Tooltip title={t('copy')}>
-                        <Button size="small" icon={<CopyOutlined />} aria-label={t('copy')} onClick={() => copyValue(subClashLink)} />
-                      </Tooltip>
-                      <Popover
-                        trigger="click"
-                        placement="left"
-                        destroyOnHidden
-                        content={<QrPanel value={subClashLink} remark={`${client.email} — Clash / Mihomo`} size={220} />}
-                      >
-                        <Tooltip title={t('pages.clients.qrCode')}>
-                          <Button size="small" icon={<QrcodeOutlined />} aria-label={t('pages.clients.qrCode')} />
-                        </Tooltip>
-                      </Popover>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
 
             {links.length > 0 && (
               <>
@@ -544,14 +394,11 @@ export default function ClientInfoModal({
                 }}
               >
                 {entry.ip}{entry.time ? ` (${entry.time})` : ''}
-                {entry.node ? (
-                  <span style={{ marginInlineStart: 6, opacity: 0.85, fontWeight: 600 }}>@ {entry.node}</span>
-                ) : null}
               </Tag>
             ))}
           </div>
         ) : (
-          <Tag>{t('tgbot.noIpRecord')}</Tag>
+          <Tag>{t('noData')}</Tag>
         )}
       </Modal>
     </>

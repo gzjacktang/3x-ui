@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  AutoComplete,
   Button,
   Col,
   Form,
@@ -46,7 +45,7 @@ const CLIENT_FORM_MODAL_Z_INDEX = 1000;
 const CLIENT_IP_LOG_MODAL_Z_INDEX = CLIENT_FORM_MODAL_Z_INDEX + 1;
 
 interface ExternalLinkRow {
-  kind: 'link' | 'subscription';
+  kind: 'link';
   value: string;
 }
 
@@ -84,8 +83,6 @@ interface ClientFormModalProps {
   inbounds: InboundOption[];
   attachedExternalLinks?: ExternalLink[];
   attachedIds?: number[];
-  tgBotEnable?: boolean;
-  groups?: string[];
   save: (
     payload: Record<string, unknown> | SaveCreatePayload,
     meta: SaveMetaEdit | SaveMetaCreate,
@@ -107,7 +104,6 @@ type Values = ClientFormValues & {
 
 const EMPTY: Values = {
   email: '',
-  subId: '',
   uuid: '',
   password: '',
   auth: '',
@@ -120,8 +116,6 @@ const EMPTY: Values = {
   delayedDays: 0,
   reset: 0,
   limitIp: 0,
-  tgId: 0,
-  group: '',
   comment: '',
   enable: true,
   inboundIds: [],
@@ -136,7 +130,7 @@ const EMPTY: Values = {
 
 function toExternalLinkRows(links: ExternalLink[] | undefined): ExternalLinkRow[] {
   return (links || []).map((l) => ({
-    kind: l.kind === 'subscription' ? 'subscription' : 'link',
+    kind: 'link',
     value: l.value || '',
   }));
 }
@@ -165,8 +159,6 @@ export default function ClientFormModal({
   inbounds,
   attachedExternalLinks = [],
   attachedIds = [],
-  tgBotEnable = false,
-  groups = [],
   save,
   resetTraffic,
   onOpenChange,
@@ -186,7 +178,6 @@ export default function ClientFormModal({
   const email = useWatch({ control: methods.control, name: 'email' });
   const uuid = useWatch({ control: methods.control, name: 'uuid' });
   const password = useWatch({ control: methods.control, name: 'password' });
-  const subId = useWatch({ control: methods.control, name: 'subId' });
   const auth = useWatch({ control: methods.control, name: 'auth' });
   const wgPrivateKey = useWatch({ control: methods.control, name: 'wgPrivateKey' });
   const limitIp = useWatch({ control: methods.control, name: 'limitIp' });
@@ -206,7 +197,7 @@ export default function ClientFormModal({
   const limitIpDisabled = !fail2ban.usable;
   const limitIpNotice = getLimitIpNotice(fail2ban, t);
 
-  function addExternalLinkRow(kind: 'link' | 'subscription') {
+  function addExternalLinkRow(kind: 'link') {
     appendExternalLink({ kind, value: '' });
   }
 
@@ -219,7 +210,6 @@ export default function ClientFormModal({
       const seed: Values = {
         ...EMPTY,
         email: client.email || '',
-        subId: client.subId || '',
         uuid: client.uuid || '',
         password: client.password || '',
         auth: client.auth || '',
@@ -231,8 +221,6 @@ export default function ClientFormModal({
         totalGB: bytesToGB(client.totalGB || 0),
         reset: Number(client.reset) || 0,
         limitIp: client.limitIp || 0,
-        tgId: Number(client.tgId) || 0,
-        group: client.group || '',
         comment: client.comment || '',
         enable: !!client.enable,
         inboundIds: Array.isArray(attachedIds) ? [...attachedIds] : [],
@@ -261,7 +249,6 @@ export default function ClientFormModal({
         ...EMPTY,
         email: RandomUtil.randomLowerAndNum(10),
         uuid: RandomUtil.randomUUID(),
-        subId: RandomUtil.randomLowerAndNum(16),
         password: RandomUtil.randomLowerAndNum(16),
         auth: RandomUtil.randomLowerAndNum(16),
         wgPrivateKey: wgKeypair.privateKey,
@@ -416,10 +403,6 @@ export default function ClientFormModal({
   const linkRows = externalLinkFields
     .map((field, index) => ({ field, index }))
     .filter((row) => row.field.kind === 'link');
-  const subscriptionRows = externalLinkFields
-    .map((field, index) => ({ field, index }))
-    .filter((row) => row.field.kind === 'subscription');
-
   async function loadIps() {
     if (!isEdit || !client?.email) return;
     setIpsLoading(true);
@@ -472,7 +455,6 @@ export default function ClientFormModal({
     const schema = isEdit ? ClientFormSchema : ClientCreateFormSchema;
     const validated = schema.safeParse({
       email: values.email,
-      subId: values.subId,
       uuid: values.uuid,
       password: values.password,
       auth: values.auth,
@@ -484,8 +466,6 @@ export default function ClientFormModal({
       delayedDays: values.delayedDays,
       reset: values.reset,
       limitIp: values.limitIp,
-      tgId: values.tgId,
-      group: values.group,
       comment: values.comment,
       enable: values.enable,
       inboundIds: values.inboundIds,
@@ -501,7 +481,6 @@ export default function ClientFormModal({
     const totalBytes = resolveTotalBytes(client ? (client.totalGB ?? 0) : null, values.totalGB);
     const clientPayload: Record<string, unknown> = {
       email: values.email.trim(),
-      subId: values.subId,
       id: values.uuid,
       password: values.password,
       auth: values.auth,
@@ -511,8 +490,6 @@ export default function ClientFormModal({
       expiryTime,
       reset: Number(values.reset) || 0,
       limitIp: Number(values.limitIp) || 0,
-      tgId: Number(values.tgId) || 0,
-      group: values.group,
       comment: values.comment,
       enable: !!values.enable,
     };
@@ -721,43 +698,15 @@ export default function ClientFormModal({
                             <Input />
                           </FormField>
                         </Col>
-                        <Col xs={24} md={12}>
-                          <FormField
-                            name="group"
-                            label={t('pages.clients.group')}
-                            tooltip={t('pages.clients.groupDesc')}
-                            transform={{ output: (v) => v ?? '' }}
-                          >
-                            <AutoComplete
-                              placeholder={t('pages.clients.groupPlaceholder')}
-                              options={groups.map((g) => ({ value: g }))}
-                              allowClear
-                            />
-                          </FormField>
-                        </Col>
                       </Row>
 
-                      {(tgBotEnable || showReverseTag) && (
+                      {showReverseTag && (
                         <Row gutter={16}>
-                          {tgBotEnable && (
-                            <Col xs={24} md={12}>
-                              <FormField
-                                name="tgId"
-                                label={t('pages.clients.telegramId')}
-                                transform={{ output: (v) => Number(v) || 0 }}
-                              >
-                                <InputNumber min={0} controls={false}
-                                  placeholder={t('pages.clients.telegramIdPlaceholder')} style={{ width: '100%' }} />
-                              </FormField>
-                            </Col>
-                          )}
-                          {showReverseTag && (
-                            <Col xs={24} md={12}>
-                              <FormField name="reverseTag" label={t('pages.clients.reverseTag')}>
-                                <Input placeholder={t('pages.clients.reverseTagPlaceholder')} />
-                              </FormField>
-                            </Col>
-                          )}
+                          <Col xs={24} md={12}>
+                            <FormField name="reverseTag" label={t('pages.clients.reverseTag')}>
+                              <Input placeholder={t('pages.clients.reverseTagPlaceholder')} />
+                            </FormField>
+                          </Col>
                         </Row>
                       )}
 
@@ -805,13 +754,6 @@ export default function ClientFormModal({
                         <Space.Compact style={{ display: 'flex' }}>
                           <Input value={password} style={{ flex: 1 }} onChange={(e) => methods.setValue('password', e.target.value)} />
                           <Button aria-label={t('regenerate')} icon={<ReloadOutlined />} onClick={regeneratePassword} />
-                        </Space.Compact>
-                      </Form.Item>
-
-                      <Form.Item label={t('pages.clients.subId')}>
-                        <Space.Compact style={{ display: 'flex' }}>
-                          <Input value={subId} style={{ flex: 1 }} onChange={(e) => methods.setValue('subId', e.target.value)} />
-                          <Button aria-label={t('regenerate')} icon={<ReloadOutlined />} onClick={() => methods.setValue('subId', RandomUtil.randomLowerAndNum(16))} />
                         </Space.Compact>
                       </Form.Item>
 
@@ -905,7 +847,7 @@ export default function ClientFormModal({
                       <Button type="primary" icon={<PlusOutlined />} onClick={() => addExternalLinkRow('link')}>
                         {t('pages.clients.addExternalLink')}
                       </Button>
-                      <div style={{ marginTop: 12, marginBottom: 24 }}>
+                      <div style={{ marginTop: 12 }}>
                         {linkRows.length === 0 ? (
                           <Typography.Text type="secondary">{t('pages.clients.noExternalLinks')}</Typography.Text>
                         ) : linkRows.map(({ field, index }) => (
@@ -924,27 +866,6 @@ export default function ClientFormModal({
                         ))}
                       </div>
 
-                      <Button type="primary" icon={<PlusOutlined />} onClick={() => addExternalLinkRow('subscription')}>
-                        {t('pages.clients.addExternalSubscription')}
-                      </Button>
-                      <div style={{ marginTop: 12 }}>
-                        {subscriptionRows.length === 0 ? (
-                          <Typography.Text type="secondary">{t('pages.clients.noExternalSubscriptions')}</Typography.Text>
-                        ) : subscriptionRows.map(({ field, index }) => (
-                          <div key={field.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                            <FormField name={`externalLinks.${index}.value`} noStyle>
-                              <Input
-                                style={{ flex: 1 }}
-                                aria-label="https://provider.example/sub/…"
-                                placeholder="https://provider.example/sub/…"
-                              />
-                            </FormField>
-                            <Tooltip title={t('delete')}>
-                              <Button aria-label={t('delete')} danger icon={<DeleteOutlined />} onClick={() => removeExternalLink(index)} />
-                            </Tooltip>
-                          </div>
-                        ))}
-                      </div>
                     </>
                   ),
                 },
@@ -988,14 +909,11 @@ export default function ClientFormModal({
                 }}
               >
                 {entry.ip}{entry.time ? ` (${entry.time})` : ''}
-                {entry.node ? (
-                  <span style={{ marginInlineStart: 6, opacity: 0.85, fontWeight: 600 }}>@ {entry.node}</span>
-                ) : null}
               </Tag>
             ))}
           </div>
         ) : (
-          <Tag>{t('tgbot.noIpRecord')}</Tag>
+          <Tag>{t('noData')}</Tag>
         )}
       </Modal>
     </>

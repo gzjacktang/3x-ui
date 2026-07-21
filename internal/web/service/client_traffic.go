@@ -94,9 +94,6 @@ func (s *ClientService) BulkResetTraffic(inboundSvc *InboundService, emails []st
 	err := submitTrafficWrite(func() error {
 		db := database.GetDB()
 		return db.Transaction(func(tx *gorm.DB) error {
-			if err := adjustGroupBaselinesForRemovedTraffic(tx, cleanEmails); err != nil {
-				return err
-			}
 			for _, batch := range chunkStrings(cleanEmails, sqlInChunk) {
 				res := tx.Model(xray.ClientTraffic{}).
 					Where("email IN ?", batch).
@@ -157,10 +154,6 @@ func (s *ClientService) resetAllClientTrafficsLocked(id int) error {
 		}
 		if len(resetEmails) == 0 {
 			return nil
-		}
-
-		if err := adjustGroupBaselinesForRemovedTraffic(tx, resetEmails); err != nil {
-			return err
 		}
 
 		result := tx.Model(xray.ClientTraffic{}).

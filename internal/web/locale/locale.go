@@ -1,5 +1,3 @@
-// Package locale provides internationalization (i18n) support for the 3x-ui web panel,
-// including translation loading, localization, and middleware for web and bot interfaces.
 package locale
 
 import (
@@ -19,35 +17,23 @@ import (
 var (
 	i18nBundle   *i18n.Bundle
 	LocalizerWeb *i18n.Localizer
-	LocalizerBot *i18n.Localizer
 )
 
 // I18nType represents the type of interface for internationalization.
 type I18nType string
 
 const (
-	Bot I18nType = "bot" // Bot interface type
 	Web I18nType = "web" // Web interface type
 )
 
-// SettingService interface defines methods for accessing locale settings.
-type SettingService interface {
-	GetTgLang() (string, error)
-}
-
 // InitLocalizer initializes the internationalization system with embedded translation files.
-func InitLocalizer(i18nFS embed.FS, settingService SettingService) error {
+func InitLocalizer(i18nFS embed.FS) error {
 	// set default bundle to English
 	i18nBundle = i18n.NewBundle(language.MustParse("en-US"))
 	i18nBundle.RegisterUnmarshalFunc("json", json.Unmarshal)
 
 	// parse files
 	if err := parseTranslationFiles(i18nFS, i18nBundle); err != nil {
-		return err
-	}
-
-	// setup bot locale
-	if err := initTGBotLocalizer(settingService); err != nil {
 		return err
 	}
 
@@ -74,26 +60,18 @@ func createTemplateData(params []string, separator ...string) map[string]any {
 // It supports both bot and web contexts, with optional template parameters.
 // Returns the localized message or an empty string if localization fails.
 func I18n(i18nType I18nType, key string, params ...string) string {
-	var localizer *i18n.Localizer
-
-	switch i18nType {
-	case "bot":
-		localizer = LocalizerBot
-	case "web":
-		localizer = LocalizerWeb
-	default:
+	if i18nType != Web {
 		logger.Errorf("Invalid type for I18n: %s", i18nType)
 		return ""
 	}
 
 	templateData := createTemplateData(params)
 
-	if localizer == nil {
-		// Fallback to key if localizer not ready; prevents nil panic on pages like sub
+	if LocalizerWeb == nil {
 		return key
 	}
 
-	msg, err := localizer.Localize(&i18n.LocalizeConfig{
+	msg, err := LocalizerWeb.Localize(&i18n.LocalizeConfig{
 		MessageID:    key,
 		TemplateData: templateData,
 	})
@@ -103,17 +81,6 @@ func I18n(i18nType I18nType, key string, params ...string) string {
 	}
 
 	return msg
-}
-
-// initTGBotLocalizer initializes the bot localizer with the configured language.
-func initTGBotLocalizer(settingService SettingService) error {
-	botLang, err := settingService.GetTgLang()
-	if err != nil {
-		return err
-	}
-
-	LocalizerBot = i18n.NewLocalizer(i18nBundle, botLang)
-	return nil
 }
 
 // LocalizerMiddleware returns a Gin middleware that sets up localization for web requests.
@@ -126,7 +93,6 @@ func LocalizerMiddleware() gin.HandlerFunc {
 		if i18nBundle == nil {
 			i18nBundle = i18n.NewBundle(language.MustParse("en-US"))
 			i18nBundle.RegisterUnmarshalFunc("json", json.Unmarshal)
-			// Try lazy-load from disk when running sub server without InitLocalizer
 			if err := loadTranslationsFromDisk(i18nBundle); err != nil {
 				logger.Warning("i18n lazy load failed:", err)
 			}

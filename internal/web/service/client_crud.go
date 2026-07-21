@@ -60,9 +60,6 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 		return false, common.NewError("at least one inbound is required")
 	}
 
-	if client.SubID == "" {
-		client.SubID = uuid.NewString()
-	}
 	if !client.Enable {
 		client.Enable = true
 	}
@@ -79,8 +76,11 @@ func (s *ClientService) Create(inboundSvc *InboundService, payload *ClientCreate
 	}
 	emailTaken := !errors.Is(err, gorm.ErrRecordNotFound)
 	if emailTaken {
-		if existing.SubID == "" || existing.SubID != client.SubID {
+		if existing.SubID != "" && client.SubID != "" && existing.SubID != client.SubID {
 			return false, common.NewError("email already in use:", client.Email)
+		}
+		if client.SubID == "" {
+			client.SubID = existing.SubID
 		}
 		// Reuse stored credentials when re-adding an existing identity, or
 		// fillProtocolDefaults mints a fresh UUID that desyncs other inbounds.
@@ -338,9 +338,6 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 	if updated.SubID == "" {
 		updated.SubID = existing.SubID
 	}
-	if updated.SubID == "" {
-		updated.SubID = uuid.NewString()
-	}
 	updated.UpdatedAt = time.Now().UnixMilli()
 	if updated.CreatedAt == 0 {
 		updated.CreatedAt = existing.CreatedAt
@@ -445,18 +442,6 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 		return needRestart, err
 	}
 
-	// Persist the group explicitly. SyncInbound deliberately preserves the
-	// stored group when the inbound settings carry none — so a node snapshot or a
-	// group-less settings rebuild can't wipe it (see SyncInbound + its tests).
-	// That guard also meant clearing the group in the client editor never took
-	// effect. The editor always round-trips the field, so apply it here,
-	// including the empty string that removes the client from its group.
-	if err := database.GetDB().Model(&model.ClientRecord{}).
-		Where("id = ?", id).
-		UpdateColumn("group_name", updated.Group).Error; err != nil {
-		return needRestart, err
-	}
-
 	// Same shape as the group write above: SyncInbound keeps a stored ad-tag
 	// when the incoming settings carry none, so clearing the override must be
 	// applied here, where the editor always round-trips the field.
@@ -532,11 +517,6 @@ func (s *ClientService) Delete(inboundSvc *InboundService, id int, keepTraffic b
 
 	db := database.GetDB()
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if existing.Email != "" {
-			if err := adjustGroupBaselinesForRemovedTraffic(tx, []string{existing.Email}); err != nil {
-				return err
-			}
-		}
 		if err := tx.Where("client_id = ?", id).Delete(&model.ClientInbound{}).Error; err != nil {
 			return err
 		}

@@ -82,11 +82,11 @@ export default function OutboundCardList({
       <div className="card-egress">
         <div className="card-egress-row">
           <span>{t('pages.xray.outbound.egress')}:</span>
-          <Tooltip title={t('pages.index.toggleIpVisibility')}>
+          <Tooltip title={t('pages.xray.toggleIpVisibility')}>
             {isEgressVisible ? (
-              <EyeOutlined className="ip-toggle-icon" role="button" tabIndex={0} aria-label={t('pages.index.toggleIpVisibility')} onClick={() => setCardEgressVisible(rowKey, false)} onKeyDown={activateOnKey(() => setCardEgressVisible(rowKey, false))} />
+              <EyeOutlined className="ip-toggle-icon" role="button" tabIndex={0} aria-label={t('pages.xray.toggleIpVisibility')} onClick={() => setCardEgressVisible(rowKey, false)} onKeyDown={activateOnKey(() => setCardEgressVisible(rowKey, false))} />
             ) : (
-              <EyeInvisibleOutlined className="ip-toggle-icon" role="button" tabIndex={0} aria-label={t('pages.index.toggleIpVisibility')} onClick={() => setCardEgressVisible(rowKey, true)} onKeyDown={activateOnKey(() => setCardEgressVisible(rowKey, true))} />
+              <EyeInvisibleOutlined className="ip-toggle-icon" role="button" tabIndex={0} aria-label={t('pages.xray.toggleIpVisibility')} onClick={() => setCardEgressVisible(rowKey, true)} onKeyDown={activateOnKey(() => setCardEgressVisible(rowKey, true))} />
             )}
           </Tooltip>
           {egress.country && (
