@@ -15,7 +15,9 @@ import {
   Row,
   Space,
   Spin,
+  Tag,
 } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 
 import { useTheme } from '@/hooks/useTheme';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -33,6 +35,7 @@ import { BalancersTab } from './balancers';
 import { cleanupOrphanedBalancerLoopbacks, ensureMissingBalancerLoopbacks, detectBalancerCycles } from './balancers/balancer-loopback';
 import { DnsTab } from './dns';
 import { WarpModal, NordModal } from './overrides';
+import XrayVersionModal from './XrayVersionModal';
 import './XrayPage.css';
 
 const SECTION_SLUGS = ['basic', 'routing', 'outbound', 'balancer', 'dns', 'advanced'];
@@ -57,6 +60,7 @@ export default function XrayPage() {
     setTemplateSettings,
     outboundTestUrl,
     setOutboundTestUrl,
+    xrayVersion,
     inboundTags,
     clientReverseTags,
     outboundsTraffic,
@@ -72,6 +76,7 @@ export default function XrayPage() {
 
   const [warpOpen, setWarpOpen] = useState(false);
   const [nordOpen, setNordOpen] = useState(false);
+  const [versionOpen, setVersionOpen] = useState(false);
   const [advSettings, setAdvSettings] = useState<AdvKey>('xraySetting');
   const location = useLocation();
   const navigate = useNavigate();
@@ -312,7 +317,11 @@ export default function XrayPage() {
                     <Card hoverable>
                       <Row className="header-row">
                         <Col xs={24} sm={14} className="header-actions">
-                          <Space>
+                          <Space wrap>
+                            <Tag color="blue">Xray {xrayVersion || 'Unknown'}</Tag>
+                            <Button icon={<DownloadOutlined />} onClick={() => setVersionOpen(true)}>
+                              {t('pages.xray.versionManager')}
+                            </Button>
                             <Button type="primary" disabled={saveDisabled} onClick={onSaveAll}>
                               {t('pages.xray.save')}
                             </Button>
@@ -353,6 +362,12 @@ export default function XrayPage() {
           onResetOutbound={onResetOutbound}
           onRemoveOutbound={onRemoveOutboundByIndex}
           onRemoveRoutingRules={onRemoveRoutingRules}
+        />
+        <XrayVersionModal
+          open={versionOpen}
+          currentVersion={xrayVersion}
+          onClose={() => setVersionOpen(false)}
+          onInstalled={fetchAll}
         />
       </Layout>
     </ConfigProvider>

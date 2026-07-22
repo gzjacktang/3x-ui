@@ -17,13 +17,13 @@ import (
 
 // XraySettingController handles Xray configuration and settings operations.
 type XraySettingController struct {
-	XraySettingService          service.XraySettingService
-	SettingService              service.SettingService
-	InboundService              service.InboundService
-	OutboundService             outbound.OutboundService
-	XrayService                 service.XrayService
-	WarpService                 integration.WarpService
-	NordService                 integration.NordService
+	XraySettingService service.XraySettingService
+	SettingService     service.SettingService
+	InboundService     service.InboundService
+	OutboundService    outbound.OutboundService
+	XrayService        service.XrayService
+	WarpService        integration.WarpService
+	NordService        integration.NordService
 }
 
 // NewXraySettingController creates a new XraySettingController and initializes its routes.
@@ -94,6 +94,7 @@ func (a *XraySettingController) getXraySetting(c *gin.Context) {
 		"inboundTags":       json.RawMessage(inboundTags),
 		"clientReverseTags": json.RawMessage(clientReverseTags),
 		"outboundTestUrl":   outboundTestUrl,
+		"xrayVersion":       a.XrayService.GetXrayVersion(),
 	}
 	result, err := json.Marshal(xrayResponse)
 	if err != nil {

@@ -911,6 +911,18 @@
       "secretClearUndo": "Undo clear"
     },
     "xray": {
+      "versionManager": "Core Version",
+      "versionManagerDesc": "Select and install an Xray core version. Connections will be interrupted briefly while switching versions.",
+      "versionCurrent": "Current version: {version}",
+      "versionCurrentShort": "Current",
+      "versionSelectPlaceholder": "Select an Xray version",
+      "versionListEmpty": "No versions available",
+      "versionListFailed": "Failed to load the Xray version list",
+      "versionSwitchConfirmTitle": "Switch Xray Core Version",
+      "versionSwitchConfirmDesc": "Install {version}? Xray will restart during installation.",
+      "versionInstalling": "Downloading and installing the Xray core...",
+      "versionRestartHint": "Xray will restart automatically after installation.",
+      "versionInstall": "Install Selected Version",
       "title": "Xray Configs",
       "save": "Save",
       "restart": "Restart Xray",

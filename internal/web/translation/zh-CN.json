@@ -911,6 +911,18 @@
       "secretClearUndo": "撤销清除"
     },
     "xray": {
+      "versionManager": "内核版本",
+      "versionManagerDesc": "选择并安装 Xray 内核版本。版本切换期间连接会暂时中断。",
+      "versionCurrent": "当前版本：{version}",
+      "versionCurrentShort": "当前",
+      "versionSelectPlaceholder": "选择 Xray 版本",
+      "versionListEmpty": "没有可用版本",
+      "versionListFailed": "获取 Xray 版本列表失败",
+      "versionSwitchConfirmTitle": "切换 Xray 内核版本",
+      "versionSwitchConfirmDesc": "确定安装 {version} 吗？安装过程中 Xray 将重新启动。",
+      "versionInstalling": "正在下载并安装 Xray 内核...",
+      "versionRestartHint": "安装完成后 Xray 会自动重新启动。",
+      "versionInstall": "安装所选版本",
       "importRules": "导入规则",
       "exportRules": "导出规则",
       "importOutbounds": "导入出站",

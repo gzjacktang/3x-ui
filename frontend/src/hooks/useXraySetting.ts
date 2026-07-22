@@ -56,6 +56,7 @@ export interface UseXraySettingResult {
   setTemplateSettings: SetTemplate;
   outboundTestUrl: string;
   setOutboundTestUrl: (v: string) => void;
+  xrayVersion: string;
   inboundTags: string[];
   clientReverseTags: string[];
   outboundsTraffic: OutboundTrafficRow[];
@@ -360,6 +361,7 @@ export function useXraySetting(): UseXraySettingResult {
       setTemplateSettings,
       outboundTestUrl,
       setOutboundTestUrl,
+      xrayVersion: configQuery.data?.xrayVersion ?? '',
       inboundTags,
       clientReverseTags,
       outboundsTraffic,
@@ -384,6 +386,7 @@ export function useXraySetting(): UseXraySettingResult {
       setTemplateSettings,
       outboundTestUrl,
       setOutboundTestUrl,
+      configQuery.data?.xrayVersion,
       inboundTags,
       clientReverseTags,
       outboundsTraffic,
