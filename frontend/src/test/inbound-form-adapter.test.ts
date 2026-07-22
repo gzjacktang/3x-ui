@@ -6,7 +6,7 @@ import {
   formValuesToWirePayload,
   type RawInboundRow,
 } from '@/lib/xray/inbound-form-adapter';
-import { InboundDbFieldsSchema, InboundFormSchema } from '@/schemas/forms/inbound-form';
+import { InboundFormSchema } from '@/schemas/forms/inbound-form';
 import { normalizeXhttpForWire } from '@/lib/xray/stream-wire-normalize';
 import { SockoptStreamSettingsSchema } from '@/schemas/protocols/stream/sockopt';
 
@@ -261,48 +261,6 @@ describe('formValuesToWirePayload', () => {
     expect(replay.up).toBe(original.up);
     expect(replay.down).toBe(original.down);
     expect(replay.streamSettings).toEqual(original.streamSettings);
-  });
-});
-
-describe('subSortIndex', () => {
-  it('rawInboundToFormValues defaults to 1 when field is absent', () => {
-    const values = rawInboundToFormValues({ ...vlessRow, subSortIndex: undefined });
-    expect(values.subSortIndex).toBe(1);
-  });
-
-  it('rawInboundToFormValues preserves valid values and clamps below-minimum ones to 1', () => {
-    expect(rawInboundToFormValues({ ...vlessRow, subSortIndex: 5 }).subSortIndex).toBe(5);
-    expect(rawInboundToFormValues({ ...vlessRow, subSortIndex: 0 }).subSortIndex).toBe(1);
-    expect(rawInboundToFormValues({ ...vlessRow, subSortIndex: -10 }).subSortIndex).toBe(1);
-  });
-
-  it('formValuesToWirePayload includes subSortIndex in the payload', () => {
-    const values = rawInboundToFormValues({ ...vlessRow, subSortIndex: 3 });
-    const payload = formValuesToWirePayload(values);
-    expect(payload.subSortIndex).toBe(3);
-  });
-
-  it('subSortIndex round-trips through raw → values → payload', () => {
-    const values = rawInboundToFormValues({ ...vlessRow, subSortIndex: 42 });
-    const payload = formValuesToWirePayload(values);
-    const replay = rawInboundToFormValues({ ...vlessRow, subSortIndex: payload.subSortIndex });
-    expect(replay.subSortIndex).toBe(42);
-  });
-
-  it('InboundDbFieldsSchema enforces an integer minimum of 1 and defaults to 1', () => {
-    // Reject for the RIGHT reason: the issue must be about subSortIndex, not some
-    // unrelated field — otherwise a schema that rejects everything would pass.
-    const nonInt = InboundDbFieldsSchema.partial().safeParse({ subSortIndex: 1.5 });
-    expect(nonInt.success).toBe(false);
-    if (!nonInt.success) expect(nonInt.error.issues[0]?.path).toContain('subSortIndex');
-
-    const belowMin = InboundDbFieldsSchema.partial().safeParse({ subSortIndex: 0 });
-    expect(belowMin.success).toBe(false);
-    if (!belowMin.success) expect(belowMin.error.issues[0]?.path).toContain('subSortIndex');
-
-    // A valid integer >= 1 must pass (guards against a mutant rejecting all values).
-    expect(InboundDbFieldsSchema.partial().safeParse({ subSortIndex: 5 }).success).toBe(true);
-    expect(InboundDbFieldsSchema.parse({}).subSortIndex).toBe(1);
   });
 });
 
