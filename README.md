@@ -14,6 +14,7 @@
 - 回落（Fallback）：在同一端口提供多种协议。
 - 客户端管理：流量配额、到期时间、IP 限制、在线状态、分享链接和二维码。
 - 出站与路由：手工出站、WARP、NordVPN、自定义路由规则、Balancer 和出站代理链。
+- Xray 内核管理：在“Xray 配置”页面查看当前内核版本，按需加载官方版本列表，并选择版本安装。
 - 存储：SQLite（默认）或 PostgreSQL。
 - Fail2ban：按客户端 IP 限制进行封禁。
 
@@ -26,6 +27,32 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 ```
 
 安装完成后运行 `x-ui` 打开管理菜单。安装程序会生成随机登录凭据，并将结果写入 `/etc/x-ui/install-result.env`。
+
+### Xray 内核版本管理
+
+1. 登录面板后进入“Xray 配置”。
+2. 在页面顶部点击“内核版本”。
+3. 选择官方 Xray 版本并点击“安装所选版本”。
+
+版本切换会先停止 Xray，下载并校验所选版本，安装后自动重新启动 Xray；切换期间当前连接会暂时中断。版本列表按需加载，不会启动后台定时任务。
+
+### 开发版更新
+
+`dev-latest` 是 `main` 分支的滚动测试构建，由 [GitHub Actions 发布工作流](https://github.com/gzjacktang/3x-ui/actions/workflows/release.yml) 构建并更新。修改后需等待发布完成，再使用上方命令安装最新版本；也可从 [Releases](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest) 查看当前构建版本。`dev-latest` 为测试版，不等同于稳定版。
+
+### 已安装面板的升级
+
+已安装面板可以重复执行上方安装命令升级。升级时脚本会暂停 `x-ui` 服务并替换程序文件，升级完成后自动重新启动。默认配置下以下数据会保留：
+
+- `/etc/x-ui/x-ui.db` 中的入站、客户端、出站、路由、用户和面板设置。
+- 外部 PostgreSQL 数据库中的所有数据。
+- 面板端口、访问路径、登录凭据和已配置的证书。
+
+脚本会删除并重新解压 `/usr/local/x-ui` 程序目录，因此请不要把自定义数据或手工修改的文件放在该目录中。升级前建议先备份 SQLite 数据库：
+
+```bash
+cp -a /etc/x-ui/x-ui.db "/etc/x-ui/x-ui.db.bak.$(date +%Y%m%d%H%M%S)"
+```
 
 ### 无人值守安装
 
