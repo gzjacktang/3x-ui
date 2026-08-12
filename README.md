@@ -20,12 +20,12 @@
 
 ## 快速开始
 
-当前仓库通过 `dev-latest` 发布主分支构建。安装命令只从本仓库下载脚本和构建产物：
+当前仓库自动将主分支发布为最新构建；安装命令只从本仓库下载脚本和构建产物：
 
 当前构建包内置 Xray-core `v26.7.28`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本。
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) dev-latest
+bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 ```
 
 安装完成后运行 `x-ui` 打开管理菜单。安装程序会生成随机登录凭据，并将结果写入 `/etc/x-ui/install-result.env`。
@@ -40,7 +40,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 
 ### 开发版更新
 
-`dev-latest` 是 `main` 分支的滚动测试构建，由 [GitHub Actions 发布工作流](https://github.com/gzjacktang/3x-ui/actions/workflows/release.yml) 构建并更新。修改后需等待发布完成，再使用上方命令安装最新版本；也可从 [Releases](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest) 查看当前构建版本。`dev-latest` 为测试版，不等同于稳定版。
+主分支构建由 [GitHub Actions 发布工作流](https://github.com/gzjacktang/3x-ui/actions/workflows/release.yml) 自动构建并更新。修改后需等待发布完成，再直接使用上方命令安装或升级最新版本；也可从 [Releases](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest) 查看当前构建版本。发布标签 `dev-latest` 仅为内部滚动标签，无需手动填写；该构建仍属于测试版，不等同于稳定版。
 
 ### 已安装面板的升级
 
@@ -61,7 +61,7 @@ cp -a /etc/x-ui/x-ui.db "/etc/x-ui/x-ui.db.bak.$(date +%Y%m%d%H%M%S)"
 适用于 cloud-init 的非交互式安装：
 
 ```bash
-XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) dev-latest
+XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 ```
 
 更多部署示例见 [`deploy/`](deploy/)，包括 [Cloud-init 配置](deploy/cloud-init/) 和 [Hetzner 部署说明](deploy/marketplace/hetzner/)。
