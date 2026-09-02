@@ -1209,36 +1209,15 @@ delete_ports() {
 }
 
 update_all_geofiles() {
-    local failed=0
-    update_geofiles "main" || failed=1
-    update_geofiles "IR" || failed=1
-    update_geofiles "RU" || failed=1
-    return $failed
+    update_geofiles
 }
 
 update_geofiles() {
-    case "${1}" in
-        "main")
-            dat_files=(geoip geosite)
-            dat_source="Loyalsoldier/v2ray-rules-dat"
-            ;;
-        "IR")
-            dat_files=(geoip_IR geosite_IR)
-            dat_source="chocolate4u/Iran-v2ray-rules"
-            ;;
-        "RU")
-            dat_files=(geoip_RU geosite_RU)
-            dat_source="runetfreedom/russia-v2ray-rules-dat"
-            ;;
-        *)
-            echo -e "${red}update_geofiles: unknown dataset '${1}'${plain}"
-            return 1
-            ;;
-    esac
+    dat_files=(geoip geosite)
+    dat_source="Loyalsoldier/v2ray-rules-dat"
     local failed=0 http_code
     for dat in "${dat_files[@]}"; do
-        # Remove suffix for remote filename (e.g., geoip_IR -> geoip)
-        remote_file="${dat%%_*}"
+        remote_file="${dat}"
         local dest="${xui_folder}/bin/${dat}.dat"
         local temp_file="${dest}.tmp.$$"
         rm -f "$temp_file"
@@ -1289,9 +1268,6 @@ run_geo_update() {
 
 update_geo() {
     echo -e "${green}\t1.${plain} Loyalsoldier (geoip.dat, geosite.dat)"
-    echo -e "${green}\t2.${plain} chocolate4u (geoip_IR.dat, geosite_IR.dat)"
-    echo -e "${green}\t3.${plain} runetfreedom (geoip_RU.dat, geosite_RU.dat)"
-    echo -e "${green}\t4.${plain} All"
     echo -e "${green}\t0.${plain} Back to Main Menu"
     read -rp "Choose an option: " choice
 
@@ -1300,15 +1276,6 @@ update_geo() {
             show_menu
             ;;
         1)
-            run_geo_update "Loyalsoldier datasets" update_geofiles "main"
-            ;;
-        2)
-            run_geo_update "chocolate4u datasets" update_geofiles "IR"
-            ;;
-        3)
-            run_geo_update "runetfreedom datasets" update_geofiles "RU"
-            ;;
-        4)
             run_geo_update "geo files" update_all_geofiles
             ;;
         *)
