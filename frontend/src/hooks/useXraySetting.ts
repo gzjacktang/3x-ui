@@ -57,6 +57,8 @@ export interface UseXraySettingResult {
   outboundTestUrl: string;
   setOutboundTestUrl: (v: string) => void;
   xrayVersion: string;
+  xrayRunning: boolean;
+  xrayError: string;
   inboundTags: string[];
   clientReverseTags: string[];
   outboundsTraffic: OutboundTrafficRow[];
@@ -362,6 +364,8 @@ export function useXraySetting(): UseXraySettingResult {
       outboundTestUrl,
       setOutboundTestUrl,
       xrayVersion: configQuery.data?.xrayVersion ?? '',
+      xrayRunning: configQuery.data?.xrayRunning ?? false,
+      xrayError: configQuery.data?.xrayError ?? '',
       inboundTags,
       clientReverseTags,
       outboundsTraffic,
@@ -387,6 +391,8 @@ export function useXraySetting(): UseXraySettingResult {
       outboundTestUrl,
       setOutboundTestUrl,
       configQuery.data?.xrayVersion,
+      configQuery.data?.xrayRunning,
+      configQuery.data?.xrayError,
       inboundTags,
       clientReverseTags,
       outboundsTraffic,

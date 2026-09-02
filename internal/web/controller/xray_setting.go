@@ -95,6 +95,10 @@ func (a *XraySettingController) getXraySetting(c *gin.Context) {
 		"clientReverseTags": json.RawMessage(clientReverseTags),
 		"outboundTestUrl":   outboundTestUrl,
 		"xrayVersion":       a.XrayService.GetXrayVersion(),
+		"xrayRunning":       a.XrayService.IsXrayRunning(),
+	}
+	if !a.XrayService.IsXrayRunning() {
+		xrayResponse["xrayError"] = a.XrayService.GetXrayResult()
 	}
 	result, err := json.Marshal(xrayResponse)
 	if err != nil {

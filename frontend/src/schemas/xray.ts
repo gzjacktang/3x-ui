@@ -41,6 +41,8 @@ export const XrayConfigPayloadSchema = z.object({
   clientReverseTags: z.array(z.string()).optional(),
   outboundTestUrl: z.string().optional(),
   xrayVersion: z.string().optional(),
+  xrayRunning: z.boolean().optional(),
+  xrayError: z.string().optional(),
 }).loose();
 
 export const OutboundTrafficRowSchema = z.object({

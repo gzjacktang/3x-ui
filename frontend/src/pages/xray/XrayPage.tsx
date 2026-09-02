@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Alert,
+  Badge,
   Button,
   Card,
   Col,
@@ -16,6 +17,7 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
 } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 
@@ -61,6 +63,8 @@ export default function XrayPage() {
     outboundTestUrl,
     setOutboundTestUrl,
     xrayVersion,
+    xrayRunning,
+    xrayError,
     inboundTags,
     clientReverseTags,
     outboundsTraffic,
@@ -319,6 +323,12 @@ export default function XrayPage() {
                         <Col xs={24} sm={14} className="header-actions">
                           <Space wrap>
                             <Tag color="blue">Xray {xrayVersion || 'Unknown'}</Tag>
+                            <Tooltip title={xrayRunning ? t('pages.xray.statusRunning') : (xrayError || t('pages.xray.statusStopped'))}>
+                              <Badge
+                                status={xrayRunning ? "success" : "error"}
+                                text={xrayRunning ? t('pages.xray.statusRunning') : t('pages.xray.statusError')}
+                              />
+                            </Tooltip>
                             <Button icon={<DownloadOutlined />} onClick={() => setVersionOpen(true)}>
                               {t('pages.xray.versionManager')}
                             </Button>
