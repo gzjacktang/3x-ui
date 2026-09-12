@@ -22,7 +22,7 @@
 
 当前仓库自动将主分支发布为最新构建；安装命令只从本仓库下载脚本和构建产物：
 
-当前构建包内置 Xray-core `v26.7.28`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本。
+当前构建包内置 Xray-core `v26.9.9`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本。
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
