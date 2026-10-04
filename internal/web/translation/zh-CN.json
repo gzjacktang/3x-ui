@@ -262,6 +262,7 @@
       "vlessAuthSelected": "已选择：{auth}",
       "vlessAuthGenerate": "生成密钥",
       "vlessAuthGenerateButton": "生成",
+      "vlessEncHint": "生成一对 ENC 密钥后，可在客户端选择 Vision。RAW 传输可搭配安全类型“无”使用；分享链接会自动包含客户端加密密钥。",
       "advanced": {
         "title": "入站 JSON 部分",
         "subtitle": "完整入站 JSON 以及针对 settings、sniffing 和 streamSettings 的专用编辑器。",

@@ -628,8 +628,6 @@ export default function InboundFormModal({
 
       {protocol === Protocols.SHADOWSOCKS && <ShadowsocksFields isSSWith2022={isSSWith2022} />}
 
-      {protocol === Protocols.VLESS && <VlessFields saving={saving} selectedVlessAuth={selectedVlessAuth} vlessAuthKind={vlessAuthKind} network={network} security={security} getNewVlessEnc={getNewVlessEnc} clearVlessEnc={clearVlessEnc} />}
-
       {isFallbackHost && fallbacksCard}
       {(protocol === Protocols.VLESS || protocol === Protocols.TROJAN)
         && network === 'tcp' && !isFallbackHost && (
@@ -764,6 +762,18 @@ export default function InboundFormModal({
           {realityOk && <Radio.Button value="reality">Reality</Radio.Button>}
         </Radio.Group>
       </Form.Item>
+
+      {protocol === Protocols.VLESS && (
+        <VlessFields
+          saving={saving}
+          selectedVlessAuth={selectedVlessAuth}
+          vlessAuthKind={vlessAuthKind}
+          network={network}
+          security={security}
+          getNewVlessEnc={getNewVlessEnc}
+          clearVlessEnc={clearVlessEnc}
+        />
+      )}
 
       {security === 'tls' && (
         <TlsForm

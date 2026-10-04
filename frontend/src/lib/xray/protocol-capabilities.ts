@@ -54,11 +54,12 @@ export function canEnableTlsFlow(values: CapabilityProtocolSlice): boolean {
   const network = values.streamSettings?.network;
   const security = values.streamSettings?.security;
 
+  // VLESS Encryption supports Vision on any underlying transport, including
+  // RAW without TLS. The server-side decryption key is authoritative.
+  if (hasVlessEncryption(values.settings)) return true;
+
   // Classic XTLS Vision: raw TCP carried over TLS or REALITY.
   if (network === 'tcp' && (security === 'tls' || security === 'reality')) return true;
-
-  // vlessenc carries Vision over XHTTP without transport TLS.
-  if (network === 'xhttp' && hasVlessEncryption(values.settings)) return true;
 
   return false;
 }

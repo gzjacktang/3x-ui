@@ -262,6 +262,7 @@
       "vlessAuthSelected": "Selected: {auth}",
       "vlessAuthGenerate": "Generate keys",
       "vlessAuthGenerateButton": "Generate",
+      "vlessEncHint": "Generate an ENC key pair, then select Vision for the client. RAW transport can use security None; share links include the client encryption key.",
       "advanced": {
         "title": "Inbound JSON sections",
         "subtitle": "Full inbound JSON and focused editors for settings, sniffing, and streamSettings.",

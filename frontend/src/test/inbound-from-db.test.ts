@@ -181,7 +181,7 @@ describe('protocol-capability helpers with raw coerced shapes', () => {
     })).toBe(false);
   });
 
-  it('canEnableTlsFlow allows vless + xhttp when vlessenc encryption is set', () => {
+  it('canEnableTlsFlow allows vless + ENC on XHTTP or RAW', () => {
     const enc = 'mlkem768x25519plus.native.0rtt.G3cdPSd1-NnlpTbWNSM5vHsT5VNzWfFzYSKwbUMnV1Y';
     const dec = 'mlkem768x25519plus.native.600s.mMFxPe7lz5xoq2qBk22cQYefu5fpc_2dGR8lMOKem0E';
     // XHTTP + a real (generated) encryption value → Vision flow allowed.
@@ -202,12 +202,12 @@ describe('protocol-capability helpers with raw coerced shapes', () => {
       settings: { encryption: 'none' },
       streamSettings: { network: 'xhttp', security: 'none' },
     })).toBe(false);
-    // vlessenc is XHTTP-only: TCP without tls/reality is not Vision-capable.
+    // VLESS Encryption also enables Vision on RAW without transport TLS.
     expect(canEnableTlsFlow({
       protocol: 'vless',
       settings: { decryption: dec, encryption: enc },
       streamSettings: { network: 'tcp', security: 'none' },
-    })).toBe(false);
+    })).toBe(true);
   });
 });
 

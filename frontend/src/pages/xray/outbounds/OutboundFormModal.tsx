@@ -113,13 +113,14 @@ export default function OutboundFormModal({
   const network = (useWatch({ control: methods.control, name: 'streamSettings.network' }) ?? '') as string;
   const security = (useWatch({ control: methods.control, name: 'streamSettings.security' }) ?? 'none') as string;
   const flow = (useWatch({ control: methods.control, name: 'settings.flow' }) ?? '') as string;
+  const vlessEncryption = (useWatch({ control: methods.control, name: 'settings.encryption' }) ?? '') as string;
   const reverseTag = useWatch({ control: methods.control, name: 'settings.reverseTag' });
   const wgSecretKey = useWatch({ control: methods.control, name: 'settings.secretKey' }) as string | undefined;
 
   const streamAllowed = canEnableStream({ protocol });
   const tlsAllowed = canEnableTls({ protocol, streamSettings: { network, security } });
   const realityAllowed = canEnableReality({ protocol, streamSettings: { network, security } });
-  const tlsFlowAllowed = canEnableTlsFlow({ protocol, streamSettings: { network, security } });
+  const tlsFlowAllowed = canEnableTlsFlow({ protocol, settings: { encryption: vlessEncryption }, streamSettings: { network, security } });
 
   /*
    * Parse a share link (vmess:// / vless:// / trojan:// / ss:// /

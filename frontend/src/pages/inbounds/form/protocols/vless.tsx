@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Form, Input, InputNumber, Select, Space, Typography } from 'antd';
+import { Alert, Button, Form, Input, InputNumber, Select, Space, Typography } from 'antd';
 import { Controller, useFormContext } from 'react-hook-form';
 
 import { FormField } from '@/components/form/rhf';
@@ -39,6 +39,9 @@ export default function VlessFields({
 
   return (
     <>
+      <Form.Item label="VLESS ENC">
+        <Alert type="info" showIcon title={t('pages.inbounds.vlessEncHint')} />
+      </Form.Item>
       <FormField name={['settings', 'decryption']} label={t('pages.inbounds.decryption')}>
         <Input />
       </FormField>

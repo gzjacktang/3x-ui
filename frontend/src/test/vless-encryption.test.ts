@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { vlessEncryptionAuthKind } from '@/lib/xray/vless-encryption';
+import { canEnableTlsFlow } from '@/lib/xray/protocol-capabilities';
 
 const x25519Key = 'kO9pIKKPtoUCzo3ZWfWfp0lQoWCyJC1TqL8oz1hpsFM';
 const mlkem768Key = 'A'.repeat(1590);
@@ -24,4 +25,22 @@ describe('vlessEncryptionAuthKind', () => {
       expect(vlessEncryptionAuthKind(c.encryption)).toBe(c.want);
     });
   }
+});
+
+describe('VLESS ENC Vision availability', () => {
+  it('allows RAW + ENC + Vision without transport TLS', () => {
+    expect(canEnableTlsFlow({
+      protocol: 'vless',
+      settings: { decryption: `mlkem768x25519plus.native.600s.${x25519Key}` },
+      streamSettings: { network: 'tcp', security: 'none' },
+    })).toBe(true);
+  });
+
+  it('still hides Vision on unencrypted RAW', () => {
+    expect(canEnableTlsFlow({
+      protocol: 'vless',
+      settings: { encryption: 'none', decryption: 'none' },
+      streamSettings: { network: 'tcp', security: 'none' },
+    })).toBe(false);
+  });
 });

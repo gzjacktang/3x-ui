@@ -24,9 +24,8 @@ func inboundShadowsocksMethod(protocol, settings string) string {
 
 // inboundCanEnableTlsFlow mirrors canEnableTlsFlow() from the frontend
 // (frontend/src/lib/xray/protocol-capabilities.ts). XTLS Vision is valid for
-// VLESS on TCP with tls or reality (classic), and on XHTTP when VLESS encryption
-// (vlessenc / ML-KEM) is enabled — there the post-quantum, VLESS-level
-// encryption stands in for the transport TLS that Vision relies on. settings is
+// VLESS on TCP with tls or reality (classic), and on any transport when VLESS
+// encryption (vlessenc / ML-KEM) is enabled. settings is
 // the inbound's raw settings JSON, which carries the encryption value
 // (streamSettings does not).
 func inboundCanEnableTlsFlow(protocol, streamSettings, settings string) bool {
@@ -43,14 +42,10 @@ func inboundCanEnableTlsFlow(protocol, streamSettings, settings string) bool {
 	if err := json.Unmarshal([]byte(streamSettings), &stream); err != nil {
 		return false
 	}
-	switch stream.Network {
-	case "tcp":
-		return stream.Security == "tls" || stream.Security == "reality"
-	case "xhttp":
-		return vlessEncryptionEnabled(settings)
-	default:
-		return false
+	if vlessEncryptionEnabled(settings) {
+		return true
 	}
+	return stream.Network == "tcp" && (stream.Security == "tls" || stream.Security == "reality")
 }
 
 // vlessEncryptionEnabled reports whether a VLESS inbound has VLESS-level

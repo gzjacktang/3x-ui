@@ -89,6 +89,29 @@ describe('genVlessLink', () => {
   }
 });
 
+it('exports RAW + ENC + Vision with the client encryption key', () => {
+  const [, raw] = fixturesForProtocol('vless')[0];
+  const encryption = 'mlkem768x25519plus.native.0rtt.CLIENT_PUBLIC_KEY';
+  const inbound = InboundSchema.parse({
+    ...raw,
+    settings: { ...(raw.settings as object), encryption, decryption: 'mlkem768x25519plus.native.600s.SERVER_PRIVATE_KEY' },
+    streamSettings: { network: 'tcp', security: 'none', tcpSettings: { header: { type: 'none' } } },
+  });
+  const link = genVlessLink({
+    inbound,
+    address: 'example.test',
+    port: inbound.port,
+    clientId: '11111111-2222-4333-8444-555555555555',
+    flow: 'xtls-rprx-vision',
+  });
+  const url = new URL(link);
+  expect(url.searchParams.get('type')).toBe('tcp');
+  expect(url.searchParams.get('security')).toBe('none');
+  expect(url.searchParams.get('encryption')).toBe(encryption);
+  expect(url.searchParams.get('flow')).toBe('xtls-rprx-vision');
+  expect(link).not.toContain('SERVER_PRIVATE_KEY');
+});
+
 describe('applyVlessRoute', () => {
   const id = '11111111-2222-4333-8444-555555555555';
   it('encodes a single value into the 3rd group and no-ops on invalid input', () => {
