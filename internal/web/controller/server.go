@@ -82,7 +82,19 @@ func (a *ServerController) getXrayVersion(c *gin.Context) {
 
 // getPanelUpdateInfo retrieves the current and latest panel version.
 func (a *ServerController) getPanelUpdateInfo(c *gin.Context) {
-	info, err := a.panelService.GetUpdateInfo()
+	devParam := c.Query("dev")
+	var info *panel.PanelUpdateInfo
+	var err error
+	if devParam == "" {
+		info, err = a.panelService.GetUpdateInfo()
+	} else {
+		dev, parseErr := strconv.ParseBool(devParam)
+		if parseErr != nil {
+			jsonMsg(c, "invalid data", parseErr)
+			return
+		}
+		info, err = a.panelService.GetUpdateInfoChannel(dev)
+	}
 	if err != nil {
 		logger.Debug("panel update check failed:", err)
 		c.JSON(http.StatusOK, entity.Msg{Success: false})

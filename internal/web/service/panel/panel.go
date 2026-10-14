@@ -40,7 +40,8 @@ type PanelUpdateInfo struct {
 }
 
 const (
-	panelUpdaterURL      = "https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh"
+	panelRepository      = "gzjacktang/3x-ui"
+	panelUpdaterURL      = "https://raw.githubusercontent.com/" + panelRepository + "/main/update.sh"
 	maxPanelUpdaterBytes = 2 << 20
 	// devReleaseTag is the fixed-tag rolling pre-release the CI force-moves to the
 	// newest main commit; the dev update channel installs from it.
@@ -129,7 +130,13 @@ func (s *PanelService) RestartPanel(delay time.Duration) error {
 // is enabled on a dev build it compares commits against the rolling dev release;
 // otherwise it compares versions against the latest stable tag.
 func (s *PanelService) GetUpdateInfo() (*PanelUpdateInfo, error) {
-	if devChannelActive() {
+	return s.GetUpdateInfoChannel(devChannelActive())
+}
+
+// GetUpdateInfoChannel checks the requested update channel without changing
+// the persisted channel preference.
+func (s *PanelService) GetUpdateInfoChannel(dev bool) (*PanelUpdateInfo, error) {
+	if dev {
 		return getDevUpdateInfo()
 	}
 	latest, err := fetchLatestPanelVersion()
@@ -413,10 +420,7 @@ func fetchLatestPanelVersion() (string, error) {
 // fetchPanelRelease fetches a release from GitHub. An empty tag resolves the
 // latest stable release; a non-empty tag (e.g. dev-latest) resolves that tag.
 func fetchPanelRelease(tag string) (*service.Release, error) {
-	url := "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest"
-	if tag != "" {
-		url = "https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/" + tag
-	}
+	url := panelReleaseAPIURL(tag)
 	client := (&service.SettingService{}).NewProxiedHTTPClient(10 * time.Second)
 	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
 	if reqErr != nil {
@@ -436,6 +440,14 @@ func fetchPanelRelease(tag string) (*service.Release, error) {
 		return nil, err
 	}
 	return &release, nil
+}
+
+func panelReleaseAPIURL(tag string) string {
+	base := "https://api.github.com/repos/" + panelRepository + "/releases"
+	if tag == "" {
+		return base + "/latest"
+	}
+	return base + "/tags/" + tag
 }
 
 // extractReleaseCommit reads the build commit recorded in the dev release: first

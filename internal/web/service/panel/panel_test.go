@@ -33,6 +33,20 @@ func TestIsNewerVersion(t *testing.T) {
 	}
 }
 
+func TestPanelUpdateSourcesUseFork(t *testing.T) {
+	if want := "https://raw.githubusercontent.com/gzjacktang/3x-ui/main/update.sh"; panelUpdaterURL != want {
+		t.Fatalf("panelUpdaterURL = %q, want %q", panelUpdaterURL, want)
+	}
+	for tag, want := range map[string]string{
+		"":           "https://api.github.com/repos/gzjacktang/3x-ui/releases/latest",
+		"dev-latest": "https://api.github.com/repos/gzjacktang/3x-ui/releases/tags/dev-latest",
+	} {
+		if got := panelReleaseAPIURL(tag); got != want {
+			t.Errorf("panelReleaseAPIURL(%q) = %q, want %q", tag, got, want)
+		}
+	}
+}
+
 func TestCompareVersionStringsRejectsUnexpectedFormats(t *testing.T) {
 	if _, ok := compareVersionStrings("latest", "2.9.3"); ok {
 		t.Fatal("expected non-semver latest tag to be rejected")

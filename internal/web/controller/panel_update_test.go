@@ -23,9 +23,19 @@ import (
 func newPanelUpdateTestEngine() *gin.Engine {
 	a := &ServerController{}
 	engine := gin.New()
+	engine.GET("/panel/api/server/getPanelUpdateInfo", a.getPanelUpdateInfo)
 	engine.GET("/panel/api/server/getUpdateStatus", a.getUpdateStatus)
 	engine.POST("/panel/api/server/updatePanel", a.updatePanel)
 	return engine
+}
+
+func TestGetPanelUpdateInfo_InvalidDevValueRejected(t *testing.T) {
+	newHostTestDB(t)
+	engine := newPanelUpdateTestEngine()
+	env := doPanelUpdateReq(t, engine, http.MethodGet, "/panel/api/server/getPanelUpdateInfo?dev=notabool")
+	if env.Success {
+		t.Fatal("invalid dev query must fail before contacting GitHub")
+	}
 }
 
 func doPanelUpdateReq(t *testing.T, engine *gin.Engine, method, path string) hostEnvelope {
