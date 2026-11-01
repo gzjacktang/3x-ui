@@ -2,6 +2,9 @@ module github.com/mhsanaei/3x-ui/v3
 
 go 1.26.5
 
+// Reduce exposure to CVE-2026-98432 on unpatched Linux hosts.
+godebug multipathtcp=0
+
 require (
 	github.com/gin-contrib/gzip v1.2.6
 	github.com/gin-contrib/sessions v1.1.0

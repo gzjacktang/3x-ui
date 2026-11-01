@@ -22,7 +22,9 @@
 
 当前仓库自动将主分支发布为最新构建；安装命令只从本仓库下载脚本和构建产物：
 
-当前构建包内置 Xray-core `v26.7.28`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本。
+当前构建包内置 Xray-core `v26.10.31`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本。
+
+面板自身的 TCP 监听已显式禁用 MPTCP，构建默认值及面板启动的 Xray/MTProto 子进程也默认禁用 MPTCP，以缓解 CVE-2026-98432 已公开的利用路径。用户通过高级配置显式启用的 Xray `tcpMptcp` 仍会覆盖默认值，请保持关闭。此措施不修复 Linux 内核中的底层漏洞，仍需安装发行版的内核安全更新并按要求重启。
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)

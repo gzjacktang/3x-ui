@@ -20,6 +20,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/netpolicy"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
 
@@ -732,7 +733,7 @@ func reserveLoopbackPorts(n int) ([]int, func(), error) {
 	}
 	ports := make([]int, 0, n)
 	for range n {
-		l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+		l, err := netpolicy.ListenTCP(context.Background(), "127.0.0.1:0")
 		if err != nil {
 			release()
 			return nil, nil, err

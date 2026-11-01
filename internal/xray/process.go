@@ -20,6 +20,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/netpolicy"
 )
 
 // GetBinaryName returns the Xray binary filename for the current OS and architecture.
@@ -538,6 +539,7 @@ func (p *process) Start() (err error) {
 	}
 
 	cmd := exec.CommandContext(context.Background(), GetBinaryPath(), "-c", configPath)
+	cmd.Env = netpolicy.ChildEnvironment(os.Environ())
 	cmd.Stdout = p.logWriter
 	cmd.Stderr = p.logWriter
 

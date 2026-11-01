@@ -22,6 +22,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/netpolicy"
 )
 
 // GetBinaryName returns the mtg binary filename for the current OS and arch,
@@ -159,6 +160,7 @@ func (p *Process) Start() error {
 		return errors.New("mtg is already running")
 	}
 	cmd := exec.CommandContext(context.Background(), GetBinaryPath(), "run", p.configPath)
+	cmd.Env = netpolicy.ChildEnvironment(os.Environ())
 	cmd.Stdout = p.logWriter
 	cmd.Stderr = p.logWriter
 	p.cmd = cmd

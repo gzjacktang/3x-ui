@@ -20,6 +20,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/mtproto"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/netpolicy"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/sys"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/controller"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/job"
@@ -435,7 +436,7 @@ func (s *Server) start(restartXray bool) (err error) {
 		}
 	}
 	listenAddr := net.JoinHostPort(listen, strconv.Itoa(port))
-	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", listenAddr)
+	listener, err := netpolicy.ListenTCP(context.Background(), listenAddr)
 	if err != nil {
 		return err
 	}

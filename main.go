@@ -20,6 +20,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/tunnelmonitor"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/crypto"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/netpolicy"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/sys"
 	"github.com/mhsanaei/3x-ui/v3/internal/web"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/global"
@@ -58,7 +59,12 @@ func runWebServer() {
 	if os.Getenv("XUI_PPROF") == "true" {
 		go func() {
 			logger.Info("pprof profiling server listening on 127.0.0.1:6060")
-			if err := http.ListenAndServe("127.0.0.1:6060", nil); err != nil {
+			listener, err := netpolicy.ListenTCP(context.Background(), "127.0.0.1:6060")
+			if err != nil {
+				logger.Warning("pprof listener failed: ", err)
+				return
+			}
+			if err := http.Serve(listener, nil); err != nil {
 				logger.Warning("pprof server stopped: ", err)
 			}
 		}()

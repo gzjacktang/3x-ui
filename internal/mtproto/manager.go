@@ -20,6 +20,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/netpolicy"
 )
 
 // SecretEntry is one named FakeTLS secret served by an mtg-multi process. Name is
@@ -511,7 +512,7 @@ func resetQuota(port int, token, email string) {
 // for mtg's /stats API endpoint and to allocate the per-inbound SOCKS egress
 // bridge port persisted into mtproto inbound settings.
 func FreeLocalPort() (int, error) {
-	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
+	l, err := netpolicy.ListenTCP(context.Background(), "127.0.0.1:0")
 	if err != nil {
 		return 0, err
 	}
