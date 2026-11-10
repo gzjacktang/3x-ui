@@ -29,6 +29,9 @@ func hasForbiddenClientChar(s string) bool {
 }
 
 func validateClientEmail(email string) error {
+	if email == "." || email == ".." {
+		return common.NewError("client email cannot be . or ..")
+	}
 	if hasForbiddenClientChar(email) {
 		return common.NewError("client email contains an invalid character:", email)
 	}
@@ -304,6 +307,10 @@ func applyShadowsocksClientMethod(clients []any, settings map[string]any) {
 }
 
 func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model.Client, inboundFilter ...int) (bool, error) {
+	return s.update(inboundSvc, id, updated, false, true, inboundFilter)
+}
+
+func (s *ClientService) update(inboundSvc *InboundService, id int, updated model.Client, keepInboundFlows, allowRenewal bool, inboundFilter []int) (bool, error) {
 	existing, err := s.GetByID(id)
 	if err != nil {
 		return false, err
@@ -359,6 +366,22 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 	if updated.Secret == "" {
 		updated.Secret = existing.Secret
 	}
+	if allowRenewal && !updated.Enable && s.renewalReenables(existing.Email, updated.TotalGB, updated.ExpiryTime) {
+		updated.Enable = true
+	}
+	manualDisabled := existing.ManualDisabled
+	if updated.Enable {
+		manualDisabled = false
+	} else if existing.Enable || !allowRenewal {
+		manualDisabled = true
+	}
+	var inboundFlows map[int]string
+	if keepInboundFlows {
+		inboundFlows, err = inboundFlowOverrides(id)
+		if err != nil {
+			return false, err
+		}
+	}
 
 	if updated.Email != existing.Email {
 		var collisionCount int64
@@ -401,10 +424,14 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 		if existing.Email == "" {
 			continue
 		}
-		if err := s.fillProtocolDefaults(&updated, inbound); err != nil {
+		clientForInbound := updated
+		if keepInboundFlows {
+			clientForInbound.Flow = inboundFlows[ibId]
+		}
+		if err := s.fillProtocolDefaults(&clientForInbound, inbound); err != nil {
 			return needRestart, err
 		}
-		settingsPayload, mErr := json.Marshal(map[string][]model.Client{"clients": {clientWithInboundFlow(updated, inbound)}})
+		settingsPayload, mErr := json.Marshal(map[string][]model.Client{"clients": {clientWithInboundFlow(clientForInbound, inbound)}})
 		if mErr != nil {
 			return needRestart, mErr
 		}
@@ -422,6 +449,18 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 
 	// UpdateInboundClient renames the record atomically with each inbound's
 	// settings JSON; this direct write only covers records with no inbound left.
+	if len(inboundIds) == 0 {
+		merged := updated.ToRecord()
+		merged.ManualDisabled = manualDisabled
+		if err := database.GetDB().Model(&model.ClientRecord{}).Where("id = ?", id).
+			Select("*").Omit("id", "created_at").Updates(merged).Error; err != nil {
+			return needRestart, err
+		}
+		if err := database.GetDB().Model(&xray.ClientTraffic{}).Where("email = ?", existing.Email).
+			Updates(map[string]any{"enable": updated.Enable, "total": updated.TotalGB, "expiry_time": updated.ExpiryTime, "reset": updated.Reset}).Error; err != nil {
+			return needRestart, err
+		}
+	}
 	if updated.Email != existing.Email {
 		if err := database.GetDB().Model(&model.ClientRecord{}).
 			Where("id = ? AND email = ?", id, existing.Email).
@@ -453,7 +492,7 @@ func (s *ClientService) Update(inboundSvc *InboundService, id int, updated model
 
 	if err := database.GetDB().Model(&model.ClientRecord{}).
 		Where("id = ?", id).
-		UpdateColumn("enable", updated.Enable).Error; err != nil {
+		Updates(map[string]any{"enable": updated.Enable, "manual_disabled": manualDisabled}).Error; err != nil {
 		return needRestart, err
 	}
 

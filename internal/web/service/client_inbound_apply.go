@@ -1096,6 +1096,9 @@ func (s *ClientService) ToggleClientEnableByEmail(inboundSvc *InboundService, cl
 	if err != nil {
 		return false, needRestart, err
 	}
+	if err := setClientManualStop(clientEmail, !target); err != nil {
+		return false, needRestart, err
+	}
 	return target, needRestart, nil
 }
 
@@ -1105,12 +1108,15 @@ func (s *ClientService) SetClientEnableByEmail(inboundSvc *InboundService, clien
 		return false, false, err
 	}
 	if current == enable {
-		return false, false, nil
+		return false, false, setClientManualStop(clientEmail, !enable)
 	}
 	needRestart, err := s.applyClientFieldByEmail(inboundSvc, clientEmail, func(c map[string]any) {
 		c["enable"] = enable
 	})
 	if err != nil {
+		return false, needRestart, err
+	}
+	if err := setClientManualStop(clientEmail, !enable); err != nil {
 		return false, needRestart, err
 	}
 	return true, needRestart, nil
@@ -1204,8 +1210,12 @@ func (s *ClientService) ResetClientIpLimitByEmail(inboundSvc *InboundService, cl
 }
 
 func (s *ClientService) ResetClientExpiryTimeByEmail(inboundSvc *InboundService, clientEmail string, expiry_time int64) (bool, error) {
+	reenable := s.renewalReenableFor(clientEmail, &expiry_time, nil)
 	return s.applyClientFieldByEmail(inboundSvc, clientEmail, func(c map[string]any) {
 		c["expiryTime"] = expiry_time
+		if reenable {
+			c["enable"] = true
+		}
 	})
 }
 
@@ -1213,7 +1223,12 @@ func (s *ClientService) ResetClientTrafficLimitByEmail(inboundSvc *InboundServic
 	if totalGB < 0 {
 		return false, common.NewError("totalGB must be >= 0")
 	}
+	newTotal := int64(totalGB) * 1024 * 1024 * 1024
+	reenable := s.renewalReenableFor(clientEmail, nil, &newTotal)
 	return s.applyClientFieldByEmail(inboundSvc, clientEmail, func(c map[string]any) {
-		c["totalGB"] = totalGB * 1024 * 1024 * 1024
+		c["totalGB"] = newTotal
+		if reenable {
+			c["enable"] = true
+		}
 	})
 }

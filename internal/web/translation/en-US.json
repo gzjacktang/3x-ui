@@ -125,6 +125,8 @@
       "deployTo": "Deploy to",
       "localPanel": "Local panel",
       "fallbacks": {
+        "saveFailed": "Could not load or save fallback rules. Please retry.",
+        "decryptionConflict": "VLESS ENC cannot be used with fallbacks. Remove fallback rules before saving ENC settings.",
         "title": "Fallbacks",
         "help": "When a connection on this inbound does not match any client, route it elsewhere. Pick a child inbound below to auto-fill the routing fields (SNI / ALPN / path / xver) from its transport, or leave the picker empty and set Dest directly (e.g. 8080 or 127.0.0.1:8080) to route to an external server such as Nginx. Each child inbound should listen on 127.0.0.1 with security=none.",
         "empty": "No fallbacks yet",

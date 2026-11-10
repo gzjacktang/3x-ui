@@ -41,7 +41,7 @@ func (a *IndexController) initRouter(g *gin.RouterGroup) {
 	g.GET("/", a.index)
 	g.GET("/csrf-token", a.csrfToken)
 
-	g.POST("/login", middleware.CSRFMiddleware(), a.login)
+	g.POST("/login", middleware.MaxBodyBytes(16<<10), middleware.CSRFMiddleware(), a.login)
 	g.POST("/logout", middleware.CSRFMiddleware(), a.logout)
 	g.POST("/getTwoFactorEnable", middleware.CSRFMiddleware(), a.getTwoFactorEnable)
 }
@@ -74,6 +74,11 @@ func (a *IndexController) login(c *gin.Context) {
 	}
 
 	remoteIP := getRemoteIp(c)
+	if len(form.Username) > panel.MaxUsernameLength {
+		logger.Warningf("failed login: IP=%q, reason=%q", remoteIP, "username too long")
+		pureJsonMsg(c, http.StatusOK, false, I18nWeb(c, "pages.login.toasts.wrongUsernameOrPassword"))
+		return
+	}
 	safeUser := template.HTMLEscapeString(form.Username)
 	if blockedUntil, ok := defaultLoginLimiter.allow(remoteIP, form.Username); !ok {
 		reason := "too many failed attempts"

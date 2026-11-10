@@ -24,11 +24,13 @@ type trafficWriteRequest struct {
 }
 
 var (
-	twMu     sync.Mutex
-	twQueue  chan *trafficWriteRequest
-	twCtx    context.Context
-	twCancel context.CancelFunc
-	twDone   chan struct{}
+	twMu      sync.Mutex
+	twQueue   chan *trafficWriteRequest
+	twBgQueue chan *trafficWriteRequest
+	twApplyMu sync.Mutex
+	twCtx     context.Context
+	twCancel  context.CancelFunc
+	twDone    chan struct{}
 )
 
 // StartTrafficWriter spins up the serial writer goroutine. Safe to call again
@@ -52,15 +54,17 @@ func StartTrafficWriter() {
 	}
 
 	queue := make(chan *trafficWriteRequest, trafficWriterQueueSize)
+	bgQueue := make(chan *trafficWriteRequest, trafficWriterQueueSize)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 
 	twQueue = queue
+	twBgQueue = bgQueue
 	twCtx = ctx
 	twCancel = cancel
 	twDone = done
 
-	go runTrafficWriter(ctx, queue, done)
+	go runTrafficWriter(ctx, queue, bgQueue, done)
 }
 
 // StopTrafficWriter cancels the writer context and waits for the goroutine to
@@ -88,26 +92,54 @@ func StopTrafficWriter() {
 
 func clearTrafficWriterState() {
 	twQueue = nil
+	twBgQueue = nil
 	twCtx = nil
 	twCancel = nil
 	twDone = nil
 }
 
-func runTrafficWriter(ctx context.Context, queue chan *trafficWriteRequest, done chan struct{}) {
+func runTrafficWriter(ctx context.Context, queue, bgQueue chan *trafficWriteRequest, done chan struct{}) {
 	defer close(done)
 	for {
+		// Prefer operator changes to queued periodic accounting work. Both lanes
+		// still share one consumer, so writes never execute side by side.
 		select {
 		case req := <-queue:
 			req.done <- safeApply(req.apply)
 		case <-ctx.Done():
-			for {
-				select {
-				case req := <-queue:
-					req.done <- safeApply(req.apply)
-				default:
-					return
-				}
+			drainTrafficWriter(queue, bgQueue)
+			return
+		default:
+			select {
+			case req := <-queue:
+				req.done <- safeApply(req.apply)
+			case req := <-bgQueue:
+				req.done <- safeApply(req.apply)
+			case <-ctx.Done():
+				drainTrafficWriter(queue, bgQueue)
+				return
 			}
+		}
+	}
+}
+
+func drainTrafficWriter(queue, bgQueue chan *trafficWriteRequest) {
+	for {
+		drained := false
+		select {
+		case req := <-queue:
+			req.done <- safeApply(req.apply)
+			drained = true
+		default:
+		}
+		select {
+		case req := <-bgQueue:
+			req.done <- safeApply(req.apply)
+			drained = true
+		default:
+		}
+		if !drained {
+			return
 		}
 	}
 }
@@ -130,6 +162,10 @@ func runSerializedTx(fn func(tx *gorm.DB) error) error {
 }
 
 func safeApply(fn func() error) (err error) {
+	// Inline writes before startup/after cancellation must also serialize with
+	// the worker while it drains already-queued requests.
+	twApplyMu.Lock()
+	defer twApplyMu.Unlock()
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("traffic writer panic: %v", r)
@@ -140,10 +176,21 @@ func safeApply(fn func() error) (err error) {
 }
 
 func submitTrafficWrite(fn func() error) error {
+	return submitTrafficWriteLane(fn, false)
+}
+
+func submitTrafficWriteBackground(fn func() error) error {
+	return submitTrafficWriteLane(fn, true)
+}
+
+func submitTrafficWriteLane(fn func() error, background bool) error {
 	req := &trafficWriteRequest{apply: fn, done: make(chan error, 1)}
 
 	twMu.Lock()
 	queue := twQueue
+	if background {
+		queue = twBgQueue
+	}
 	ctx := twCtx
 	done := twDone
 	if queue == nil || ctx == nil || done == nil {

@@ -110,6 +110,7 @@ func (w *procLogWriter) LastLine() string {
 
 // Process wraps a single mtg process invocation for one mtproto inbound.
 type Process struct {
+	mu              sync.RWMutex
 	cmd             *exec.Cmd
 	done            chan struct{}
 	configPath      string
@@ -127,6 +128,13 @@ func newProcess(configPath, label string) *Process {
 
 // IsRunning reports whether the mtg process is currently running.
 func (p *Process) IsRunning() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.isRunningLocked()
+}
+
+// Wait owns Cmd.ProcessState; done is the race-free exit signal.
+func (p *Process) isRunningLocked() bool {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return false
 	}
@@ -137,10 +145,7 @@ func (p *Process) IsRunning() bool {
 		default:
 		}
 	}
-	if p.cmd.ProcessState == nil {
-		return true
-	}
-	return false
+	return true
 }
 
 // GetResult returns the last log line or the exit error from the mtg process.
@@ -148,15 +153,20 @@ func (p *Process) GetResult() string {
 	if line := p.logWriter.LastLine(); line != "" {
 		return line
 	}
-	if p.exitErr != nil {
-		return p.exitErr.Error()
+	p.mu.RLock()
+	err := p.exitErr
+	p.mu.RUnlock()
+	if err != nil {
+		return err.Error()
 	}
 	return ""
 }
 
 // Start launches the mtg process against its generated config file.
 func (p *Process) Start() error {
-	if p.IsRunning() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.isRunningLocked() {
 		return errors.New("mtg is already running")
 	}
 	cmd := exec.CommandContext(context.Background(), GetBinaryPath(), "run", p.configPath)
@@ -164,21 +174,22 @@ func (p *Process) Start() error {
 	cmd.Stdout = p.logWriter
 	cmd.Stderr = p.logWriter
 	p.cmd = cmd
-	p.done = make(chan struct{})
+	done := make(chan struct{})
+	p.done = done
 	p.exitErr = nil
 	p.intentionalStop.Store(false)
 	if err := cmd.Start(); err != nil {
-		close(p.done)
+		close(done)
 		p.cmd = nil
 		return err
 	}
 	attachChildLifetime(cmd)
-	go p.wait(cmd)
+	go p.wait(cmd, done)
 	return nil
 }
 
-func (p *Process) wait(cmd *exec.Cmd) {
-	defer close(p.done)
+func (p *Process) wait(cmd *exec.Cmd, done chan struct{}) {
+	defer close(done)
 	err := cmd.Wait()
 	p.logWriter.Flush()
 	if err == nil || p.intentionalStop.Load() {
@@ -186,54 +197,66 @@ func (p *Process) wait(cmd *exec.Cmd) {
 	}
 	if runtime.GOOS == "windows" {
 		if strings.Contains(strings.ToLower(err.Error()), "exit status 1") {
-			p.exitErr = err
+			p.setExitErr(cmd, err)
 			return
 		}
 	}
 	logger.Errorf("mtproto: mtg process exited: %v", err)
-	p.exitErr = err
+	p.setExitErr(cmd, err)
+}
+
+func (p *Process) setExitErr(cmd *exec.Cmd, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.cmd == cmd {
+		p.exitErr = err
+	}
 }
 
 // Stop terminates the running mtg process gracefully, falling back to a kill.
 func (p *Process) Stop() error {
-	if !p.IsRunning() {
+	p.mu.Lock()
+	if !p.isRunningLocked() {
+		p.mu.Unlock()
 		return errors.New("mtg is not running")
 	}
+	cmd, done := p.cmd, p.done
 	p.intentionalStop.Store(true)
+	p.mu.Unlock()
 
 	if runtime.GOOS == "windows" {
-		if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return err
 		}
-		return p.waitForExit(forceStopTimeout)
+		return waitForProcessExit(done, forceStopTimeout)
 	}
 
-	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		if errors.Is(err, os.ErrProcessDone) {
-			return p.waitForExit(forceStopTimeout)
+			return waitForProcessExit(done, forceStopTimeout)
 		}
 		return err
 	}
 
-	if err := p.waitForExit(gracefulStopTimeout); err == nil {
+	if err := waitForProcessExit(done, gracefulStopTimeout); err == nil {
 		return nil
 	}
 
 	logger.Warning("mtproto: mtg did not stop after SIGTERM, killing process")
-	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
 	}
-	return p.waitForExit(forceStopTimeout)
+	return waitForProcessExit(done, forceStopTimeout)
 }
 
-func (p *Process) waitForExit(timeout time.Duration) error {
-	if p.done == nil {
+func waitForProcessExit(done <-chan struct{}, timeout time.Duration) error {
+	if done == nil {
 		return nil
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
-	case <-p.done:
+	case <-done:
 		return nil
 	case <-timer.C:
 		return fmt.Errorf("timed out waiting for mtg process to stop after %s", timeout)

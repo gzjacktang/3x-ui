@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
+import { storybookTestPathCompat } from './.storybook/vitest-story-path-compat.ts';
 
 const dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,7 +23,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'unit',
-          include: ['src/test/**/*.test.ts'],
+          include: ['src/test/**/*.test.ts', '.storybook/**/*.test.ts'],
           environment: 'node',
           setupFiles: ['./src/test/setup.ts', './src/test/setup.msw.ts'],
         },
@@ -41,7 +42,10 @@ export default defineConfig({
         optimizeDeps: {
           include: ['aria-query', 'lz-string', 'pretty-format', 'dom-accessibility-api'],
         },
-        plugins: [storybookTest({ configDir: path.join(dirname, '.storybook') })],
+        plugins: [
+          storybookTest({ configDir: path.join(dirname, '.storybook') }),
+          storybookTestPathCompat(),
+        ],
         test: {
           name: 'storybook',
           browser: {

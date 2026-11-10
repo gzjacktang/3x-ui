@@ -58,6 +58,7 @@ func (s *ClientService) SyncInbound(tx *gorm.DB, inboundId int, clients []model.
 		incoming := clients[i].ToRecord()
 		row, ok := existing[email]
 		if !ok {
+			incoming.ManualDisabled = !incoming.Enable
 			if _, dup := pending[email]; !dup {
 				pending[email] = incoming
 				toCreate = append(toCreate, incoming)
@@ -103,6 +104,9 @@ func (s *ClientService) SyncInbound(tx *gorm.DB, inboundId int, clients []model.
 		row.LimitIP = incoming.LimitIP
 		row.TotalGB = incoming.TotalGB
 		row.ExpiryTime = incoming.ExpiryTime
+		if row.Enable != incoming.Enable {
+			row.ManualDisabled = !incoming.Enable
+		}
 		row.Enable = incoming.Enable
 		row.TgID = incoming.TgID
 		if incoming.Group != "" {
@@ -136,6 +140,13 @@ func (s *ClientService) SyncInbound(tx *gorm.DB, inboundId int, clients []model.
 			return err
 		}
 		for _, rec := range toCreate {
+			if rec.ManualDisabled {
+				// GORM replaces false with Enable's default on insert.
+				if err := tx.Model(rec).UpdateColumn("enable", false).Error; err != nil {
+					return err
+				}
+				rec.Enable = false
+			}
 			idByEmail[rec.Email] = rec.Id
 		}
 	}

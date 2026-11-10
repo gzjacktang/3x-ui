@@ -393,9 +393,6 @@ func resolveHost(c *gin.Context) string {
 			}
 			return h
 		}
-		if h := c.GetHeader("X-Real-IP"); h != "" {
-			return h
-		}
 	}
 	if h, _, err := net.SplitHostPort(c.Request.Host); err == nil {
 		return h

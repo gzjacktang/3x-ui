@@ -2,8 +2,9 @@ package panel
 
 import (
 	"errors"
+	"fmt"
+	"time"
 
-	"github.com/xlzd/gotp"
 	"gorm.io/gorm"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
@@ -11,6 +12,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/crypto"
 	ldaputil "github.com/mhsanaei/3x-ui/v3/internal/util/ldap"
+	"github.com/mhsanaei/3x-ui/v3/internal/util/totp"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 )
 
@@ -18,6 +20,17 @@ import (
 // It handles user creation, login, password management, and 2FA operations.
 type UserService struct {
 	settingService service.SettingService
+}
+
+func (s *UserService) HasDefaultCredential() (bool, error) {
+	user, err := s.GetFirstUser()
+	if database.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return user.Username == "admin" && crypto.CheckPasswordHash(user.Password, "admin"), nil
 }
 
 // GetFirstUser retrieves the first user from the database.
@@ -97,7 +110,7 @@ func (s *UserService) CheckUser(username string, password string, twoFactorCode 
 			return nil, err
 		}
 
-		if gotp.NewDefaultTOTP(twoFactorToken).Now() != twoFactorCode {
+		if !totp.VerifyWithSkew(twoFactorToken, twoFactorCode, time.Now()) {
 			return nil, errors.New("invalid 2fa code")
 		}
 	}
@@ -114,6 +127,9 @@ func (s *UserService) BumpLoginEpoch() error {
 }
 
 func (s *UserService) UpdateUser(id int, username string, password string) error {
+	if len(username) > MaxUsernameLength {
+		return fmt.Errorf("username can not be longer than %d bytes", MaxUsernameLength)
+	}
 	db := database.GetDB()
 	hashedPassword, err := crypto.HashPasswordAsBcrypt(password)
 	if err != nil {
@@ -143,6 +159,8 @@ func (s *UserService) UpdateUser(id int, username string, password string) error
 func (s *UserService) UpdateFirstUser(username string, password string) error {
 	if username == "" {
 		return errors.New("username can not be empty")
+	} else if len(username) > MaxUsernameLength {
+		return fmt.Errorf("username can not be longer than %d bytes", MaxUsernameLength)
 	} else if password == "" {
 		return errors.New("password can not be empty")
 	}
@@ -167,3 +185,5 @@ func (s *UserService) UpdateFirstUser(username string, password string) error {
 	user.LoginEpoch++
 	return db.Save(user).Error
 }
+
+const MaxUsernameLength = 256

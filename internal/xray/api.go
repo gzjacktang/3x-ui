@@ -6,6 +6,7 @@ package xray
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -47,6 +48,10 @@ var (
 	clientTrafficRegex = regexp.MustCompile(`user>>>([^>]+)>>>traffic>>>(downlink|uplink)`)
 )
 
+var statsFamilies = []string{"user>>>", "inbound>>>", "outbound>>>"}
+
+const maxStatsReplyBytes = 64 << 20
+
 // XrayAPI is a gRPC client for managing Xray core configuration, inbounds, outbounds, and statistics.
 type XrayAPI struct {
 	HandlerServiceClient *command.HandlerServiceClient
@@ -55,6 +60,15 @@ type XrayAPI struct {
 	grpcClient           *grpc.ClientConn
 	isConnected          bool
 	StatsLastValues      map[string]int64
+	statsBaselined       map[string]bool
+}
+
+func IsMissingUserErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") && !strings.Contains(msg, "failed to get handler")
 }
 
 func getRequiredUserString(user map[string]any, key string) (string, error) {
@@ -92,7 +106,7 @@ func (x *XrayAPI) Init(apiPort int) error {
 	}
 
 	addr := fmt.Sprintf("127.0.0.1:%d", apiPort)
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxStatsReplyBytes)))
 	if err != nil {
 		return fmt.Errorf("failed to connect to Xray API: %w", err)
 	}
@@ -131,18 +145,24 @@ func (x *XrayAPI) Close() {
 const handlerRPCTimeout = 10 * time.Second
 
 // AddInbound adds a new inbound configuration to the Xray core via gRPC.
-func (x *XrayAPI) AddInbound(inbound []byte) error {
+func (x *XrayAPI) AddInbound(inbound []byte) (err error) {
+	defer recoverConfigPanic(&err)
 	if x.HandlerServiceClient == nil {
 		return common.NewError("xray HandlerServiceClient is not initialized")
 	}
 	client := *x.HandlerServiceClient
 
+	ensureXrayAssetLocation()
 	conf := new(conf.InboundDetourConfig)
-	err := json.Unmarshal(inbound, conf)
+	err = json.Unmarshal(inbound, conf)
 	if err != nil {
 		logger.Debug("Failed to unmarshal inbound:", err)
 		return err
 	}
+	if err := checkUntrustedBuildInput(conf.StreamSetting, inbound); err != nil {
+		return err
+	}
+	localizeNoiseScripts(conf.StreamSetting)
 	config, err := conf.Build()
 	if err != nil {
 		logger.Debug("Failed to build inbound Detur:", err)
@@ -175,30 +195,60 @@ func (x *XrayAPI) DelInbound(tag string) error {
 // xray-core config loader, surfacing the exact error the core would raise at
 // startup — notably v26.7.11's refusal of unencrypted vless/trojan outbounds
 // whose server address is a public IP or domain.
-func ValidateOutboundConfig(outbound []byte) error {
+func ValidateOutboundConfig(outbound []byte) (err error) {
+	ensureXrayAssetLocation()
+	defer recoverConfigPanic(&err)
 	detour := new(conf.OutboundDetourConfig)
 	if err := json.Unmarshal(outbound, detour); err != nil {
 		return err
 	}
-	_, err := detour.Build()
-	return err
+	if err := checkUntrustedBuildInput(detour.StreamSetting, outbound); err != nil {
+		return err
+	}
+	localizeNoiseScripts(detour.StreamSetting)
+	built, err := detour.Build()
+	if err != nil {
+		return err
+	}
+	if err := validateXhttpDownloadSettings(built.SenderSettings); err != nil {
+		return err
+	}
+	return validateHandlerSettings(built.ProxySettings)
+}
+
+func recoverConfigPanic(err *error) {
+	if r := recover(); r != nil {
+		*err = common.NewErrorf("xray-core config loader panicked: %v", r)
+	}
 }
 
 // AddOutbound adds a new outbound configuration to the Xray core via gRPC.
-func (x *XrayAPI) AddOutbound(outbound []byte) error {
+func (x *XrayAPI) AddOutbound(outbound []byte) (err error) {
+	defer recoverConfigPanic(&err)
 	if x.HandlerServiceClient == nil {
 		return common.NewError("xray HandlerServiceClient is not initialized")
 	}
 	client := *x.HandlerServiceClient
 
+	ensureXrayAssetLocation()
 	conf := new(conf.OutboundDetourConfig)
 	if err := json.Unmarshal(outbound, conf); err != nil {
 		logger.Debug("Failed to unmarshal outbound:", err)
 		return err
 	}
+	if err := checkUntrustedBuildInput(conf.StreamSetting, outbound); err != nil {
+		return err
+	}
+	localizeNoiseScripts(conf.StreamSetting)
 	config, err := conf.Build()
 	if err != nil {
 		logger.Debug("Failed to build outbound detour:", err)
+		return err
+	}
+	if err := validateXhttpDownloadSettings(config.SenderSettings); err != nil {
+		return err
+	}
+	if err := validateHandlerSettings(config.ProxySettings); err != nil {
 		return err
 	}
 
@@ -337,6 +387,9 @@ type RouteTestResult struct {
 // TestRoute asks the running core's router which outbound it would pick for
 // the described connection, without sending any traffic.
 func (x *XrayAPI) TestRoute(req RouteTestRequest) (*RouteTestResult, error) {
+	if req.Port < 0 || req.Port > 65535 {
+		return nil, common.NewErrorf("invalid route test port: %d", req.Port)
+	}
 	if x.RoutingServiceClient == nil {
 		return nil, common.NewError("xray RoutingServiceClient is not initialized")
 	}
@@ -519,7 +572,7 @@ func buildUserAccount(protocolName string, user map[string]any) (*serial.TypedMe
 			Password: password,
 		}), nil
 	case "shadowsocks":
-		cipher, err := getOptionalUserString(user, "cipher")
+		cipher, err := shadowsocksCipherName(user)
 		if err != nil {
 			return nil, err
 		}
@@ -529,28 +582,19 @@ func buildUserAccount(protocolName string, user map[string]any) (*serial.TypedMe
 			return nil, err
 		}
 
-		var ssCipherType shadowsocks.CipherType
-		switch cipher {
-		case "aes-128-gcm":
-			ssCipherType = shadowsocks.CipherType_AES_128_GCM
-		case "aes-256-gcm":
-			ssCipherType = shadowsocks.CipherType_AES_256_GCM
-		case "chacha20-poly1305", "chacha20-ietf-poly1305":
-			ssCipherType = shadowsocks.CipherType_CHACHA20_POLY1305
-		case "xchacha20-poly1305", "xchacha20-ietf-poly1305":
-			ssCipherType = shadowsocks.CipherType_XCHACHA20_POLY1305
-		default:
-			ssCipherType = shadowsocks.CipherType_UNKNOWN
-		}
-
-		if ssCipherType != shadowsocks.CipherType_UNKNOWN {
-			return serial.ToTypedMessage(&shadowsocks.Account{
-				Password:   password,
-				CipherType: ssCipherType,
+		if isShadowsocks2022Cipher(cipher) {
+			return serial.ToTypedMessage(&shadowsocks_2022.Account{
+				Key: password,
 			}), nil
 		}
-		return serial.ToTypedMessage(&shadowsocks_2022.Account{
-			Key: password,
+
+		ssCipherType := shadowsocksCipherType(cipher)
+		if ssCipherType == shadowsocks.CipherType_UNKNOWN {
+			return nil, common.NewErrorf("shadowsocks: unknown cipher %q, cannot build an account for the running inbound", cipher)
+		}
+		return serial.ToTypedMessage(&shadowsocks.Account{
+			Password:   password,
+			CipherType: ssCipherType,
 		}), nil
 	case "hysteria":
 		auth, err := getRequiredUserString(user, "auth")
@@ -621,6 +665,10 @@ func (x *XrayAPI) AddUser(Protocol string, inboundTag string, user map[string]an
 	}
 	client := *x.HandlerServiceClient
 
+	if account.Type == legacyShadowsocksAccountType {
+		_ = x.RemoveUser(inboundTag, userEmail)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), handlerRPCTimeout)
 	defer cancel()
 	_, err = client.AlterInbound(ctx, &command.AlterInboundRequest{
@@ -659,7 +707,13 @@ func (x *XrayAPI) RemoveUser(inboundTag, email string) error {
 	return nil
 }
 
-// GetTraffic queries traffic statistics from the Xray core, optionally resetting counters.
+// GetTraffic queries traffic statistics from the Xray core and reports what
+// accrued since the previous call; the counters themselves are never reset.
+// The first call of a process only records baselines, since it may be reading
+// counters that already hold traffic the panel cannot attribute. After that a
+// name the panel has not seen — xray creates a counter on a user's first use —
+// and a counter that moved backwards because the core restarted both count
+// from zero, so no client's traffic is dropped for a whole polling interval.
 func (x *XrayAPI) GetTraffic() ([]*Traffic, []*ClientTraffic, error) {
 	if x.grpcClient == nil {
 		return nil, nil, common.NewError("xray api is not initialized")
@@ -672,37 +726,61 @@ func (x *XrayAPI) GetTraffic() ([]*Traffic, []*ClientTraffic, error) {
 		return nil, nil, common.NewError("xray StatusServiceClient is not initialized")
 	}
 
-	resp, err := (*x.StatsServiceClient).QueryStats(ctx, &statsService.QueryStatsRequest{Reset_: false})
-	if err != nil {
+	tagTrafficMap := make(map[string]*Traffic)
+	emailTrafficMap := make(map[string]*ClientTraffic)
+	if x.statsBaselined == nil {
+		x.statsBaselined = make(map[string]bool, len(statsFamilies))
+	}
+
+	var live []*statsService.Stat
+	var failed []error
+	for _, family := range statsFamilies {
+		resp, err := (*x.StatsServiceClient).QueryStats(ctx, &statsService.QueryStatsRequest{Pattern: family, Reset_: false})
+		if err != nil {
+			failed = append(failed, fmt.Errorf("%s: %w", family, err))
+			continue
+		}
+		baselinePass := !x.statsBaselined[family]
+		x.statsBaselined[family] = true
+		for _, stat := range resp.GetStat() {
+			// The core matches Pattern anywhere in the name; the prefix keeps it to one family.
+			if !strings.HasPrefix(stat.Name, family) {
+				continue
+			}
+			live = append(live, stat)
+			lastValue, ok := x.StatsLastValues[stat.Name]
+			x.StatsLastValues[stat.Name] = stat.Value
+			if baselinePass {
+				continue
+			}
+			if !ok || stat.Value < lastValue {
+				lastValue = 0
+			}
+			value := stat.Value - lastValue
+			if matches := trafficRegex.FindStringSubmatch(stat.Name); len(matches) == 4 {
+				processTraffic(matches, value, tagTrafficMap)
+			} else if matches := clientTrafficRegex.FindStringSubmatch(stat.Name); len(matches) == 3 {
+				processClientTraffic(matches, value, emailTrafficMap)
+			}
+		}
+	}
+	if len(failed) == len(statsFamilies) {
+		err := errors.Join(failed...)
 		logger.Debug("Failed to query Xray stats:", err)
 		return nil, nil, err
 	}
-
-	tagTrafficMap := make(map[string]*Traffic)
-	emailTrafficMap := make(map[string]*ClientTraffic)
-
-	for _, stat := range resp.GetStat() {
-		lastValue, ok := x.StatsLastValues[stat.Name]
-		x.StatsLastValues[stat.Name] = stat.Value
-		if !ok || stat.Value < lastValue {
-			// skip first time of seen stat
-			continue
-		}
-		value := stat.Value - lastValue
-		if matches := trafficRegex.FindStringSubmatch(stat.Name); len(matches) == 4 {
-			processTraffic(matches, value, tagTrafficMap)
-		} else if matches := clientTrafficRegex.FindStringSubmatch(stat.Name); len(matches) == 3 {
-			processClientTraffic(matches, value, emailTrafficMap)
-		}
+	for _, err := range failed {
+		logger.Warning("Failed to query Xray stats, counting the other families:", err)
 	}
 
 	// Drop delta baselines for stats that no longer exist (deleted inbounds or
 	// clients), which otherwise linger until the next Xray restart. Only rebuild
 	// when the map has drifted past 2x the live set, so the steady-state hot path
 	// stays allocation-free.
-	if n := len(resp.GetStat()); n > 0 && len(x.StatsLastValues) > 2*n {
+	// A family that failed is not gone, so its baselines stay.
+	if n := len(live); n > 0 && len(failed) == 0 && len(x.StatsLastValues) > 2*n {
 		pruned := make(map[string]int64, n)
-		for _, stat := range resp.GetStat() {
+		for _, stat := range live {
 			pruned[stat.Name] = x.StatsLastValues[stat.Name]
 		}
 		x.StatsLastValues = pruned

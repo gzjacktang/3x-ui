@@ -29,6 +29,8 @@ func SetLoginUser(c *gin.Context, user *model.User) error {
 		return nil
 	}
 	s := sessions.Default(c)
+	// Anonymous state, especially its CSRF token, must not survive login.
+	s.Clear()
 	s.Set(loginUserKey, user.Id)
 	s.Set(loginEpochKey, user.LoginEpoch)
 	return s.Save()

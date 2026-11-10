@@ -12,7 +12,6 @@ import {
   FreedomFragmentSchema,
   FreedomNoiseSchema,
   OutboundDomainStrategySchema,
-  WireguardDomainStrategySchema,
 } from '@/schemas/protocols/outbound';
 
 export const VmessOutboundFormSettingsSchema = z.object({
@@ -104,7 +103,7 @@ export const WireguardOutboundFormSettingsSchema = z.object({
   secretKey: z.string().default(''),
   pubKey: z.string().default(''),
   address: z.string().default(''),
-  domainStrategy: z.union([WireguardDomainStrategySchema, z.literal('')]).default(''),
+  remoteDNS: z.string().default(''),
   reserved: z.string().default(''),
   peers: z.array(WireguardOutboundFormPeerSchema).default([]),
   noKernelTun: z.boolean().default(false),

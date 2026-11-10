@@ -1,6 +1,7 @@
 package service
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -26,34 +27,38 @@ func (s *ClientService) ResetTrafficByEmail(inboundSvc *InboundService, email st
 		return false, err
 	}
 
-	needRestart := false
-	if !rec.Enable {
-		updated := rec.ToClient()
-		updated.Enable = true
-		nr, uErr := s.Update(inboundSvc, rec.Id, *updated)
-		if uErr != nil {
-			logger.Warning("Failed to auto-enable client during traffic reset:", uErr)
-		}
-		if nr {
-			needRestart = true
-		}
+	// Decide before any reset erases the reason for the disabled state.
+	restore, err := quotaDisabledEmails(database.GetDB(), []string{email})
+	if err != nil {
+		return false, err
 	}
+	needRestart := false
 
 	if len(inboundIds) == 0 {
 		if rErr := inboundSvc.ResetClientTrafficByEmail(email); rErr != nil {
 			return false, rErr
 		}
-		return needRestart, nil
+	} else {
+		for _, ibId := range inboundIds {
+			nr, rErr := inboundSvc.ResetClientTraffic(ibId, email)
+			if rErr != nil {
+				return needRestart, rErr
+			}
+			if nr {
+				needRestart = true
+			}
+		}
 	}
-
-	for _, ibId := range inboundIds {
-		nr, rErr := inboundSvc.ResetClientTraffic(ibId, email)
-		if rErr != nil {
-			return needRestart, rErr
+	// Enabling before zeroing races the next quota tick and turns the client
+	// straight back off. An operator's manual disable is never lifted here.
+	if !rec.Enable && len(restore) > 0 {
+		updated := rec.ToClient()
+		updated.Enable = true
+		nr, err := s.Update(inboundSvc, rec.Id, *updated)
+		if err != nil {
+			return needRestart, err
 		}
-		if nr {
-			needRestart = true
-		}
+		needRestart = needRestart || nr
 	}
 	return needRestart, nil
 }
@@ -79,29 +84,21 @@ func (s *ClientService) BulkResetTraffic(inboundSvc *InboundService, emails []st
 		return 0, nil
 	}
 
-	for _, e := range cleanEmails {
-		rec, err := s.GetRecordByEmail(nil, e)
-		if err == nil && !rec.Enable {
-			updated := rec.ToClient()
-			updated.Enable = true
-			if _, uErr := s.Update(inboundSvc, rec.Id, *updated); uErr != nil {
-				logger.Warning("Failed to auto-enable client during bulk traffic reset:", uErr)
-			}
-		}
-	}
-
-	affected := 0
+	var affected int64
+	var restore []string
 	err := submitTrafficWrite(func() error {
 		db := database.GetDB()
 		return db.Transaction(func(tx *gorm.DB) error {
-			for _, batch := range chunkStrings(cleanEmails, sqlInChunk) {
-				res := tx.Model(xray.ClientTraffic{}).
-					Where("email IN ?", batch).
-					Updates(map[string]any{"enable": true, "up": 0, "down": 0})
-				if res.Error != nil {
-					return res.Error
-				}
-				affected += int(res.RowsAffected)
+			var err error
+			if restore, err = quotaDisabledEmails(tx, cleanEmails); err != nil {
+				return err
+			}
+			keepOff, err := handDisabledEmails(tx, cleanEmails)
+			if err != nil {
+				return err
+			}
+			if affected, err = zeroClientTraffics(tx, cleanEmails, keepOff); err != nil {
+				return err
 			}
 			if err := clearGlobalTraffic(tx, cleanEmails...); err != nil {
 				return err
@@ -117,22 +114,31 @@ func (s *ClientService) BulkResetTraffic(inboundSvc *InboundService, emails []st
 	if err != nil {
 		return 0, err
 	}
-	return affected, nil
+	inboundSvc.resetAllMtprotoQuotas()
+	if err := s.restoreResetClients(inboundSvc, restore); err != nil {
+		return int(affected), err
+	}
+	return int(affected), nil
 }
 
 func (s *ClientService) ResetAllClientTraffics(inboundSvc *InboundService, id int) error {
+	var restore []string
 	err := submitTrafficWrite(func() error {
-		return s.resetAllClientTrafficsLocked(id)
+		var err error
+		restore, err = s.resetAllClientTrafficsLocked(id)
+		return err
 	})
 	if err == nil {
 		inboundSvc.resetAllMtprotoQuotas()
+		return s.restoreResetClients(inboundSvc, restore)
 	}
 	return err
 }
 
-func (s *ClientService) resetAllClientTrafficsLocked(id int) error {
+func (s *ClientService) resetAllClientTrafficsLocked(id int) ([]string, error) {
 	db := database.GetDB()
 	now := time.Now().Unix() * 1000
+	var restore []string
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		// client_traffics.inbound_id is stale: it reflects the inbound the row was
@@ -156,12 +162,16 @@ func (s *ClientService) resetAllClientTrafficsLocked(id int) error {
 			return nil
 		}
 
-		result := tx.Model(xray.ClientTraffic{}).
-			Where("email IN ?", resetEmails).
-			Updates(map[string]any{"enable": true, "up": 0, "down": 0})
-
-		if result.Error != nil {
-			return result.Error
+		var err error
+		if restore, err = quotaDisabledEmails(tx, resetEmails); err != nil {
+			return err
+		}
+		keepOff, err := handDisabledEmails(tx, resetEmails)
+		if err != nil {
+			return err
+		}
+		if _, err := zeroClientTraffics(tx, resetEmails, keepOff); err != nil {
+			return err
 		}
 
 		if err := clearGlobalTraffic(tx, resetEmails...); err != nil {
@@ -181,28 +191,33 @@ func (s *ClientService) resetAllClientTrafficsLocked(id int) error {
 			inboundWhereText += " = ?"
 		}
 
-		result = tx.Model(model.Inbound{}).
+		result := tx.Model(model.Inbound{}).
 			Where(inboundWhereText, id).
 			Update("last_traffic_reset_time", now)
 
 		return result.Error
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return restore, nil
 }
 
 func (s *ClientService) ResetAllTraffics() (bool, error) {
 	var affected int64
+	var restore []string
 	err := submitTrafficWrite(func() error {
 		return database.GetDB().Transaction(func(tx *gorm.DB) error {
-			res := tx.Model(&xray.ClientTraffic{}).
-				Where("1 = 1").
-				Updates(map[string]any{"enable": true, "up": 0, "down": 0})
-			if res.Error != nil {
-				return res.Error
+			var err error
+			if restore, err = quotaDisabledEmails(tx, nil); err != nil {
+				return err
 			}
-			affected = res.RowsAffected
+			keepOff, err := handDisabledEmails(tx, nil)
+			if err != nil {
+				return err
+			}
+			if affected, err = zeroClientTraffics(tx, nil, keepOff); err != nil {
+				return err
+			}
 			if err := tx.Where("1 = 1").Delete(&model.ClientGlobalTraffic{}).Error; err != nil {
 				return err
 			}
@@ -212,5 +227,106 @@ func (s *ClientService) ResetAllTraffics() (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	inboundSvc := &InboundService{}
+	inboundSvc.resetAllMtprotoQuotas()
+	if err := s.restoreResetClients(inboundSvc, restore); err != nil {
+		return affected > 0, err
+	}
 	return affected > 0, nil
+}
+
+// Apply runtime changes only after the zeroing transaction has committed, and
+// once per inbound rather than once per client in a bulk reset.
+func (s *ClientService) restoreResetClients(inboundSvc *InboundService, emails []string) error {
+	if len(emails) == 0 {
+		return nil
+	}
+	_, needRestart, err := s.bulkSetEnable(inboundSvc, emails, true, false)
+	if needRestart {
+		(&XrayService{}).SetToNeedRestart()
+	}
+	if err != nil {
+		logger.Warning("Failed to restore quota-disabled clients after traffic reset:", err)
+	}
+	return err
+}
+
+// quotaDisabledEmails must run before resetting counters. A disabled client
+// below its quota was switched off by the operator, not the quota loop.
+func quotaDisabledEmails(tx *gorm.DB, emails []string) ([]string, error) {
+	query := func() *gorm.DB {
+		return tx.Model(&xray.ClientTraffic{}).
+			Where("email IN (?)", tx.Model(&model.ClientRecord{}).Select("email").Where("enable = ? AND manual_disabled = ?", false, false))
+	}
+	var rows []xray.ClientTraffic
+	if emails == nil {
+		if err := query().Find(&rows).Error; err != nil {
+			return nil, err
+		}
+	} else {
+		for _, batch := range chunkStrings(emails, sqlInChunk) {
+			var page []xray.ClientTraffic
+			if err := query().Where("email IN ?", batch).Find(&page).Error; err != nil {
+				return nil, err
+			}
+			rows = append(rows, page...)
+		}
+	}
+	overlayGlobalTrafficValues(tx, rows)
+	var restore []string
+	for _, row := range rows {
+		if row.Total > 0 && row.Up+row.Down >= row.Total {
+			restore = append(restore, row.Email)
+		}
+	}
+	return restore, nil
+}
+
+func handDisabledEmails(tx *gorm.DB, emails []string) ([]string, error) {
+	var disabled []string
+	query := func() *gorm.DB { return tx.Model(&model.ClientRecord{}).Where("enable = ?", false) }
+	if emails == nil {
+		if err := query().Pluck("email", &disabled).Error; err != nil {
+			return nil, err
+		}
+	} else {
+		for _, batch := range chunkStrings(emails, sqlInChunk) {
+			var page []string
+			if err := query().Where("email IN ?", batch).Pluck("email", &page).Error; err != nil {
+				return nil, err
+			}
+			disabled = append(disabled, page...)
+		}
+	}
+	quota, err := quotaDisabledEmails(tx, disabled)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(disabled, func(email string) bool { return slices.Contains(quota, email) }), nil
+}
+
+func zeroClientTraffics(tx *gorm.DB, emails, keepOff []string) (int64, error) {
+	var affected int64
+	reset := map[string]any{"enable": true, "up": 0, "down": 0}
+	if emails == nil {
+		res := tx.Model(&xray.ClientTraffic{}).Where("1 = 1").Updates(reset)
+		if res.Error != nil {
+			return 0, res.Error
+		}
+		affected = res.RowsAffected
+	} else {
+		for _, batch := range chunkStrings(emails, sqlInChunk) {
+			res := tx.Model(&xray.ClientTraffic{}).Where("email IN ?", batch).Updates(reset)
+			if res.Error != nil {
+				return 0, res.Error
+			}
+			affected += res.RowsAffected
+		}
+	}
+	for _, batch := range chunkStrings(keepOff, sqlInChunk) {
+		if err := tx.Model(&xray.ClientTraffic{}).Where("email IN ?", batch).Update("enable", false).Error; err != nil {
+			return 0, err
+		}
+	}
+	return affected, nil
 }

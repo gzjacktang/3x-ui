@@ -522,6 +522,9 @@ func (s *InboundService) normalizeStreamSettings(inbound *model.Inbound) {
 		return
 	}
 	inbound.StreamSettings = canonicalizeStreamNetworkKey(inbound.StreamSettings)
+	if upgraded, changed := database.RewriteStreamXdnsCompat(inbound.StreamSettings); changed {
+		inbound.StreamSettings = upgraded
+	}
 }
 
 // canonicalizeStreamNetworkKey rewrites a streamSettings JSON that names its
@@ -720,6 +723,9 @@ func (s *InboundService) normalizeMtprotoXrayPort(inbound *model.Inbound, oldSet
 // Returns the created inbound, whether Xray needs restart, and any error.
 func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, bool, error) {
 	inbound.Id = 0
+	if err := normalizeVlessFallbacks(inbound); err != nil {
+		return inbound, false, err
+	}
 	// Normalize streamSettings based on protocol
 	s.normalizeStreamSettings(inbound)
 	if err := validateFinalMaskRealityCombo(inbound.StreamSettings); err != nil {
@@ -868,13 +874,12 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 				if push {
 					payload := inbound
 					pushable := true
-					if inbound.Protocol == model.MTProto {
-						if built, bErr := s.buildRuntimeInboundForAPI(tx, inbound); bErr == nil {
-							payload = built
-						} else {
-							logger.Debug("Unable to prepare runtime inbound config:", bErr)
-							pushable = false
-						}
+					if built, bErr := s.buildRuntimeInboundForAPI(tx, inbound); bErr == nil {
+						payload = built
+					} else {
+						logger.Debug("Unable to prepare runtime inbound config:", bErr)
+						pushable = false
+						needRestart = true
 					}
 					if pushable {
 						postCommitApply = func() {
@@ -1142,6 +1147,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	// Restore the stored NodeID before the port-conflict check so a node inbound
 	// stays scoped to its own node (the payload's nodeId is unreliable, often absent).
 	inbound.NodeID = oldInbound.NodeID
+	if err := normalizeVlessFallbacks(inbound); err != nil {
+		return inbound, false, err
+	}
 
 	conflict, err := s.checkPortConflict(inbound, inbound.Id)
 	if err != nil {
@@ -1168,6 +1176,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	var postCommitApply func()
 
 	txErr := runSerializedTx(func(tx *gorm.DB) error {
+		if err := validateVlessManagedFallbacks(tx, inbound); err != nil {
+			return err
+		}
 		if err := s.updateClientTraffics(tx, oldInbound, inbound); err != nil {
 			return err
 		}
@@ -1397,8 +1408,14 @@ func (s *InboundService) buildRuntimeInboundForAPI(tx *gorm.DB, inbound *model.I
 	}
 
 	runtimeInbound := *inbound
+	if err := normalizeVlessFallbacks(&runtimeInbound); err != nil {
+		return nil, err
+	}
+	if err := validateVlessManagedFallbacks(tx, &runtimeInbound); err != nil {
+		return nil, err
+	}
 	settings := map[string]any{}
-	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+	if err := json.Unmarshal([]byte(runtimeInbound.Settings), &settings); err != nil {
 		return nil, err
 	}
 
@@ -1407,13 +1424,24 @@ func (s *InboundService) buildRuntimeInboundForAPI(tx *gorm.DB, inbound *model.I
 		return &runtimeInbound, nil
 	}
 
+	// The traffic row's inbound_id is only its original owner; shared clients
+	// and recreated inbounds must be filtered by email, not that stale ID.
+	emails := make([]string, 0, len(clients))
+	for _, raw := range clients {
+		if client, ok := raw.(map[string]any); ok {
+			if email, _ := client["email"].(string); email != "" {
+				emails = append(emails, email)
+			}
+		}
+	}
 	var clientStats []xray.ClientTraffic
-	err := tx.Model(xray.ClientTraffic{}).
-		Where("inbound_id = ?", inbound.Id).
-		Select("email", "enable").
-		Find(&clientStats).Error
-	if err != nil {
-		return nil, err
+	for _, batch := range chunkStrings(emails, sqlInChunk) {
+		var page []xray.ClientTraffic
+		if err := tx.Model(xray.ClientTraffic{}).Where("email IN ?", batch).
+			Select("email", "enable").Find(&page).Error; err != nil {
+			return nil, err
+		}
+		clientStats = append(clientStats, page...)
 	}
 
 	enableMap := make(map[string]bool, len(clientStats))
@@ -1441,6 +1469,7 @@ func (s *InboundService) buildRuntimeInboundForAPI(tx *gorm.DB, inbound *model.I
 	}
 
 	settings["clients"] = finalClients
+	xray.LockShadowsocks2022(settings)
 	modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return nil, err

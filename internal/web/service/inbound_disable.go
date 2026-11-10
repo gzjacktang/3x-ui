@@ -49,6 +49,57 @@ func (s *InboundService) disableInvalidInbounds(tx *gorm.DB) (bool, int64, error
 	return needRestart, count, err
 }
 
+// Match the same pre-reset quota state used by the periodic reset. Expired
+// inbounds and ones manually disabled below their cap must stay disabled.
+const quotaDisabledInboundCond = `enable = ? AND node_id IS NULL AND total > 0 AND up + down >= total AND (expiry_time <= 0 OR expiry_time > ?)`
+
+func quotaDisabledInboundIDs(db *gorm.DB, nowMs int64) ([]int, error) {
+	var ids []int
+	err := db.Model(&model.Inbound{}).Where("user_id > ?", 0).
+		Where(quotaDisabledInboundCond, false, nowMs).Pluck("id", &ids).Error
+	return ids, err
+}
+
+func quotaDisabledInbound(db *gorm.DB, id int, nowMs int64) (bool, error) {
+	var count int64
+	err := db.Model(&model.Inbound{}).Where("id = ?", id).
+		Where(quotaDisabledInboundCond, false, nowMs).Count(&count).Error
+	return count > 0, err
+}
+
+// The lifecycle job stamps a disabled record at/after its deadline; a manual
+// disable of a live client predates it. Judge copies before renew zeroes usage.
+func lifecycleDisabledEmails(tx *gorm.DB, rows []xray.ClientTraffic) (map[string]struct{}, error) {
+	emails := make([]string, 0, len(rows))
+	for _, row := range rows {
+		emails = append(emails, row.Email)
+	}
+	records := map[string]*model.ClientRecord{}
+	for _, batch := range chunkStrings(emails, sqlInChunk) {
+		var page []model.ClientRecord
+		if err := tx.Where("email IN ?", batch).Find(&page).Error; err != nil {
+			return nil, err
+		}
+		for i := range page {
+			records[page[i].Email] = &page[i]
+		}
+	}
+	overlayGlobalTrafficValues(tx, rows)
+	disabled := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		record := records[row.Email]
+		if record != nil && record.ManualDisabled {
+			continue
+		}
+		depleted := row.Total > 0 && row.Up+row.Down >= row.Total
+		expired := record != nil && row.ExpiryTime > 0 && record.UpdatedAt >= row.ExpiryTime/1000*1000
+		if depleted || expired {
+			disabled[row.Email] = struct{}{}
+		}
+	}
+	return disabled, nil
+}
+
 // depletedClientsCond matches clients that exhausted their quota or expired.
 // Besides the local counters it also trips on the cross-panel usage a master
 // pushed into client_global_traffics — that's what lets a node cut a client
@@ -202,6 +253,36 @@ func (s *InboundService) disableInvalidClients(tx *gorm.DB) (bool, int64, error)
 	}
 
 	return needRestart, count, nil
+}
+
+func (s *InboundService) markClientEnabledInSettings(tx *gorm.DB, inboundID int, email string) error {
+	var inbound model.Inbound
+	if err := tx.First(&inbound, inboundID).Error; err != nil {
+		return err
+	}
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+		return err
+	}
+	clients, _ := settings["clients"].([]any)
+	changed := false
+	for _, raw := range clients {
+		client, ok := raw.(map[string]any)
+		if !ok || client["email"] != email || client["enable"] == true {
+			continue
+		}
+		client["enable"] = true
+		client["updated_at"] = time.Now().UnixMilli()
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return tx.Model(&model.Inbound{}).Where("id = ?", inboundID).Update("settings", string(data)).Error
 }
 
 // markClientsDisabledInSettings flips client.enable=false in the inbound's

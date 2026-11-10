@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
+	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
@@ -110,6 +111,11 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		return nil, err
 	}
 
+	templateConfig, _, err = database.RewriteXrayTemplateCompat(templateConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	xrayConfig := &xray.Config{}
 	err = json.Unmarshal([]byte(templateConfig), xrayConfig)
 	if err != nil {
@@ -139,6 +145,12 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		}
 		if inbound.Protocol == model.MTProto {
 			continue
+		}
+		if err := normalizeVlessFallbacks(inbound); err != nil {
+			return nil, err
+		}
+		if err := validateVlessManagedFallbacks(nil, inbound); err != nil {
+			return nil, err
 		}
 		settings := map[string]any{}
 		_ = json.Unmarshal([]byte(inbound.Settings), &settings)
@@ -226,6 +238,10 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 			}
 		}
 
+		if inbound.Protocol == model.Shadowsocks && xray.LockShadowsocks2022(settings) {
+			mutated = true
+		}
+
 		if inboundCanHostFallbacks(inbound) {
 			fallbacks, fbErr := s.inboundService.fallbackService.BuildFallbacksJSON(nil, inbound.Id)
 			if fbErr != nil {
@@ -249,6 +265,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 			inbound.Settings = string(modifiedSettings)
 		}
 
+		if upgraded, changed := database.RewriteStreamXdnsCompat(inbound.StreamSettings); changed {
+			inbound.StreamSettings = upgraded
+		}
 		if len(inbound.StreamSettings) > 0 {
 			// Unmarshal stream JSON
 			var stream map[string]any

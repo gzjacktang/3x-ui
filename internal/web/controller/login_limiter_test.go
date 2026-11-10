@@ -9,7 +9,7 @@ import (
 
 func TestLoginLimiterBoundsMemoryUnderUsernameFlood(t *testing.T) {
 	limiter := newLoginLimiter(5, 5*time.Minute, 15*time.Minute)
-	for i := 0; i < loginLimitMaxRecords+100; i++ {
+	for i := range loginLimitMaxRecords + 100 {
 		limiter.registerFailure("1.2.3.4", "user-"+strconv.Itoa(i))
 	}
 
@@ -28,7 +28,7 @@ func TestLoginLimiterEvictionSparesActiveBlocks(t *testing.T) {
 	limiter.now = func() time.Time { return now }
 
 	limiter.mu.Lock()
-	for i := 0; i < loginLimitMaxRecords-1; i++ {
+	for i := range loginLimitMaxRecords - 1 {
 		limiter.attempts["victim-"+strconv.Itoa(i)] = &loginLimitRecord{blockedUntil: now.Add(10 * time.Minute)}
 	}
 	limiter.attempts["filler"] = &loginLimitRecord{failures: []time.Time{now}}
@@ -116,5 +116,47 @@ func TestLoginLimiterSeparatesIPAndUsername(t *testing.T) {
 	}
 	if _, ok := limiter.allow("192.0.2.10", "other-admin"); !ok {
 		t.Fatal("different username should not be blocked")
+	}
+}
+
+// Without a per-address bound, one address can fill the table with its own blocked
+// records and evict the record holding its admin failures, resetting the count.
+func TestLoginLimiterBlocksAnAddressSpreadingFailuresOverUsernames(t *testing.T) {
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	limiter := newLoginLimiter(5, 5*time.Minute, 15*time.Minute)
+	limiter.now = func() time.Time { return now }
+
+	for i := range 5 * loginLimitIPFactor {
+		if _, ok := limiter.allow("192.0.2.10", "decoy-"+strconv.Itoa(i)); !ok {
+			t.Fatalf("attempt %d refused before the address limit", i+1)
+		}
+		limiter.registerFailure("192.0.2.10", "decoy-"+strconv.Itoa(i))
+	}
+	if _, ok := limiter.allow("192.0.2.10", "admin"); ok {
+		t.Fatal("an address past its failure budget may still try the admin account")
+	}
+	if _, ok := limiter.allow("192.0.2.11", "admin"); !ok {
+		t.Fatal("another address was blocked too")
+	}
+}
+
+// The count must cover attempts admitted and still being checked: bcrypt is slow, and
+// a burst sent at once would otherwise all pass before the first failure is recorded.
+func TestLoginLimiterCountsAttemptsStillBeingChecked(t *testing.T) {
+	now := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
+	limiter := newLoginLimiter(5, 5*time.Minute, 15*time.Minute)
+	limiter.now = func() time.Time { return now }
+
+	for i := range 5 {
+		if _, ok := limiter.allow("192.0.2.10", "admin"); !ok {
+			t.Fatalf("attempt %d of a burst refused", i+1)
+		}
+	}
+	if _, ok := limiter.allow("192.0.2.10", "admin"); ok {
+		t.Fatal("a sixth concurrent attempt was admitted")
+	}
+	now = now.Add(20 * time.Minute)
+	if _, ok := limiter.allow("192.0.2.10", "admin"); !ok {
+		t.Fatal("attempts that never reported back still block after the window and cooldown")
 	}
 }

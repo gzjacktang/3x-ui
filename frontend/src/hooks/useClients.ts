@@ -260,7 +260,7 @@ export function useClients() {
 
   const hydrate = useCallback(async (email: string): Promise<ClientHydrate | null> => {
     if (!email) return null;
-    const msg = await HttpUtil.get(`/panel/api/clients/get/${encodeURIComponent(email)}`);
+    const msg = await HttpUtil.get(`/panel/api/clients/get?email=${encodeURIComponent(email)}`);
     if (!msg?.success || !msg.obj) return null;
     const validated = parseMsg(msg, ClientHydrateSchema, 'clients/get');
     return validated.obj;
@@ -274,15 +274,15 @@ export function useClients() {
 
   const updateMut = useMutation({
     mutationFn: ({ email, client }: { email: string; client: unknown }) =>
-      HttpUtil.post(`/panel/api/clients/update/${encodeURIComponent(email)}`, client, JSON_HEADERS),
+      HttpUtil.post(`/panel/api/clients/update?email=${encodeURIComponent(email)}`, client, JSON_HEADERS),
     onSuccess: (msg) => { if (msg?.success) invalidateAll(); },
   });
 
   const removeMut = useMutation({
     mutationFn: ({ email, keepTraffic }: { email: string; keepTraffic?: boolean }) => {
       const url = keepTraffic
-        ? `/panel/api/clients/del/${encodeURIComponent(email)}?keepTraffic=1`
-        : `/panel/api/clients/del/${encodeURIComponent(email)}`;
+        ? `/panel/api/clients/del?email=${encodeURIComponent(email)}&keepTraffic=1`
+        : `/panel/api/clients/del?email=${encodeURIComponent(email)}`;
       return HttpUtil.post(url);
     },
     onSuccess: (msg) => { if (msg?.success) invalidateAll(); },

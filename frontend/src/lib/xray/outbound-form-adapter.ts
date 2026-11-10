@@ -1,6 +1,6 @@
 import { XHttpXmuxSchema } from '@/schemas/protocols/stream/xhttp';
 import { OutboundDomainStrategySchema } from '@/schemas/protocols/outbound';
-import { normalizeStreamSettingsForWire } from '@/lib/xray/stream-wire-normalize';
+import { dropEmptyFinalMask, normalizeStreamSettingsForWire } from '@/lib/xray/stream-wire-normalize';
 import { Wireguard } from '@/utils';
 import type { Sniffing, SniffingDest } from '@/schemas/primitives';
 import type { OutboundDomainStrategy } from '@/schemas/protocols/outbound';
@@ -66,6 +66,24 @@ function targetStrategyFromWire(value: unknown): OutboundDomainStrategy | '' {
   return OutboundDomainStrategySchema.options.find(
     (v) => v.toLowerCase() === s.toLowerCase(),
   ) ?? '';
+}
+
+// Mirrors the order the loader migrates freedom's legacy strategy keys in:
+// root targetStrategy, settings targetStrategy, settings domainStrategy, sockopt.
+export function freedomDomainStrategyFromWire(outbound: {
+  targetStrategy?: unknown;
+  settings?: unknown;
+  streamSettings?: unknown;
+}): OutboundDomainStrategy | '' {
+  const settings = asObject(outbound.settings);
+  const sockopt = asObject(asObject(outbound.streamSettings).sockopt);
+  const root = targetStrategyFromWire(outbound.targetStrategy);
+  const settingsKey = asString(settings.targetStrategy)
+    ? settings.targetStrategy
+    : settings.domainStrategy;
+  const legacy = root && root !== 'AsIs' ? root : targetStrategyFromWire(settingsKey);
+  if (legacy && legacy !== 'AsIs') return legacy;
+  return targetStrategyFromWire(sockopt.domainStrategy);
 }
 
 const SNIFFING_DEST_VALUES: readonly SniffingDest[] = ['http', 'tls', 'quic', 'fakedns'];
@@ -213,9 +231,7 @@ function httpFromWire(raw: Raw): HttpOutboundFormSettings {
 
 function wireguardFromWire(raw: Raw): WireguardOutboundFormSettings {
   const secretKey = asString(raw.secretKey);
-  const pubKey = secretKey.length > 0
-    ? Wireguard.generateKeypair(secretKey).publicKey
-    : '';
+  const pubKey = secretKey.length > 0 ? Wireguard.generateKeypair(secretKey).publicKey : '';
   const addressArr = asArray(raw.address).map((x) =>
     typeof x === 'number' ? String(x) : asString(x),
   );
@@ -238,14 +254,47 @@ function wireguardFromWire(raw: Raw): WireguardOutboundFormSettings {
     secretKey,
     pubKey,
     address: addressArr.join(','),
-    domainStrategy: ((): WireguardOutboundFormSettings['domainStrategy'] => {
-      const allowed = ['ForceIP', 'ForceIPv4', 'ForceIPv4v6', 'ForceIPv6', 'ForceIPv6v4'];
-      const s = asString(raw.domainStrategy);
-      return (allowed.includes(s) ? s : '') as WireguardOutboundFormSettings['domainStrategy'];
-    })(),
     reserved: reservedArr.join(','),
+    remoteDNS: isLegacyLocalRemoteDNS(raw.remoteDNS)
+      ? ''
+      : asArray(raw.remoteDNS)
+          .map((x) => asString(x))
+          .join(','),
     peers,
     noKernelTun: asBool(raw.noKernelTun),
+  };
+}
+
+// remoteDNS ["local"] is a mode xray-core 26.9.30 removed; the core now panics parsing
+// it as an address, so liftLegacyWireguardStrategy carries it over to targetStrategy.
+function isLegacyLocalRemoteDNS(value: unknown): boolean {
+  const list = asArray(value);
+  return list.length === 1 && list[0] === 'local';
+}
+
+const isAsIs = (strategy: OutboundDomainStrategy | '') => strategy === '' || strategy === 'AsIs';
+
+// xray-core 26.9.30 (#6771) ignores wireguard's settings.domainStrategy: sockopt.domainStrategy
+// now picks the endpoint's family, targetStrategy the targets'. Mirrors the Go seeder.
+function liftLegacyWireguardStrategy(
+  settings: Raw,
+  targetStrategy: OutboundDomainStrategy | '',
+  streamSettings: OutboundStreamFormValues | undefined,
+): { targetStrategy: OutboundDomainStrategy | ''; streamSettings?: OutboundStreamFormValues } {
+  const legacy = targetStrategyFromWire(settings.domainStrategy);
+  const family = legacy.startsWith('ForceIP') && legacy !== 'ForceIP' ? legacy : '';
+  const lifted = family || (isLegacyLocalRemoteDNS(settings.remoteDNS) ? 'ForceIP' : '');
+  let stream = streamSettings;
+  const sockopt = asObject((stream as Raw | undefined)?.sockopt);
+  if (family && isAsIs(targetStrategyFromWire(sockopt.domainStrategy))) {
+    stream = {
+      ...(stream ?? {}),
+      sockopt: { ...sockopt, domainStrategy: family },
+    } as OutboundStreamFormValues;
+  }
+  return {
+    targetStrategy: lifted && isAsIs(targetStrategy) ? lifted : targetStrategy,
+    streamSettings: stream,
   };
 }
 
@@ -257,15 +306,21 @@ function hysteriaFromWire(raw: Raw): HysteriaOutboundFormSettings {
   };
 }
 
-function freedomFromWire(raw: Raw): FreedomOutboundFormSettings {
+function freedomFromWire(
+  raw: Raw,
+  domainStrategy: OutboundDomainStrategy | '',
+): FreedomOutboundFormSettings {
   const fragment = asObject(raw.fragment);
   const noises = asArray(raw.noises).map((n) => {
     const nn = asObject(n);
     return {
-      type: (asString(nn.type, 'rand') as FreedomOutboundFormSettings['noises'][number]['type']),
+      type: asString(nn.type, 'rand') as FreedomOutboundFormSettings['noises'][number]['type'],
       packet: asString(nn.packet, '10-20'),
       delay: asString(nn.delay, '10-16'),
-      applyTo: (asString(nn.applyTo, 'ip') as FreedomOutboundFormSettings['noises'][number]['applyTo']),
+      applyTo: asString(
+        nn.applyTo,
+        'ip',
+      ) as FreedomOutboundFormSettings['noises'][number]['applyTo'],
     };
   });
   const finalRulesRaw = asArray(raw.finalRules);
@@ -275,7 +330,9 @@ function freedomFromWire(raw: Raw): FreedomOutboundFormSettings {
       ? rr.network.map((x) => asString(x)).join(',')
       : asString(rr.network);
     return {
-      action: (asString(rr.action, 'block') === 'allow' ? 'allow' : 'block') as FreedomFinalRuleForm['action'],
+      action: (asString(rr.action, 'block') === 'allow'
+        ? 'allow'
+        : 'block') as FreedomFinalRuleForm['action'],
       network,
       port: asString(rr.port),
       ip: asArray(rr.ip).map((x) => asString(x)),
@@ -293,18 +350,15 @@ function freedomFromWire(raw: Raw): FreedomOutboundFormSettings {
   // legacy behavior: when the wire omits fragment, leave all four fields
   // empty so the modal's "Fragment" Switch starts off. When present,
   // surface whatever the wire holds verbatim.
-  const wireHasFragment = raw.fragment != null
-    && typeof raw.fragment === 'object'
-    && Object.keys(fragment).length > 0;
+  const wireHasFragment =
+    raw.fragment != null && typeof raw.fragment === 'object' && Object.keys(fragment).length > 0;
   return {
-    domainStrategy: targetStrategyFromWire(
-      asString(raw.targetStrategy) || asString(raw.domainStrategy),
-    ),
+    domainStrategy,
     redirect: asString(raw.redirect),
     userLevel: asNumber(raw.userLevel, 0),
     proxyProtocol: ((): FreedomOutboundFormSettings['proxyProtocol'] => {
       const n = asNumber(raw.proxyProtocol, 0);
-      return (n === 1 || n === 2) ? n : 0;
+      return n === 1 || n === 2 ? n : 0;
     })(),
     fragment: wireHasFragment
       ? {
@@ -414,6 +468,7 @@ export function rawOutboundToFormValues(raw: RawOutboundRow): OutboundFormValues
   const tag = asString(raw.tag);
   const sendThrough = asString(raw.sendThrough);
   const targetStrategy = targetStrategyFromWire(raw.targetStrategy);
+  const freedomStrategy = freedomDomainStrategyFromWire(raw);
   const mux = muxFromWire(raw.mux);
   const hasStream = raw.streamSettings
     && typeof raw.streamSettings === 'object'
@@ -432,20 +487,25 @@ export function rawOutboundToFormValues(raw: RawOutboundRow): OutboundFormValues
     case 'http':        typed = { protocol: 'http',        settings: httpFromWire(settings) }; break;
     case 'wireguard':   typed = { protocol: 'wireguard',   settings: wireguardFromWire(settings) }; break;
     case 'hysteria':    typed = { protocol: 'hysteria',    settings: hysteriaFromWire(settings) }; break;
-    case 'freedom':     typed = { protocol: 'freedom',     settings: freedomFromWire(settings) }; break;
+    case 'freedom':     typed = { protocol: 'freedom',     settings: freedomFromWire(settings, freedomStrategy) }; break;
     case 'blackhole':   typed = { protocol: 'blackhole',   settings: blackholeFromWire(settings) }; break;
     case 'dns':         typed = { protocol: 'dns',         settings: dnsFromWire(settings) }; break;
     case 'loopback':    typed = { protocol: 'loopback',    settings: loopbackFromWire(settings) }; break;
     default:            typed = { protocol: 'vless',       settings: vlessFromWire(settings) };
   }
 
+  const placed =
+    protocol === 'wireguard'
+      ? liftLegacyWireguardStrategy(settings, targetStrategy, streamSettings)
+      : { targetStrategy, streamSettings };
+
   return {
     ...typed,
     tag,
     sendThrough,
-    targetStrategy,
+    targetStrategy: protocol === 'freedom' ? '' : placed.targetStrategy,
     mux,
-    streamSettings,
+    streamSettings: placed.streamSettings,
   };
 }
 
@@ -536,8 +596,8 @@ function wireguardToWire(s: WireguardOutboundFormSettings) {
   return {
     mtu: s.mtu || undefined,
     secretKey: s.secretKey,
+    remoteDNS: s.remoteDNS ? s.remoteDNS.split(',').map((x) => x.trim()).filter(Boolean) : undefined,
     address: s.address ? s.address.split(',').map((x) => x.trim()).filter(Boolean) : [],
-    domainStrategy: s.domainStrategy || undefined,
     reserved: s.reserved
       ? s.reserved.split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n))
       : undefined,
@@ -557,8 +617,6 @@ function hysteriaToWire(s: HysteriaOutboundFormSettings) {
 }
 
 function freedomToWire(s: FreedomOutboundFormSettings) {
-  // The strategy is emitted under the legacy domainStrategy key: new cores
-  // fall back to it when targetStrategy is absent, old cores only know it.
   // Legacy semantics: emit fragment only when the user actually populated
   // at least one of the four sub-fields. Defaults like packets='1-3' alone
   // are not enough — the modal's Fragment Switch sets all four together.
@@ -568,7 +626,6 @@ function freedomToWire(s: FreedomOutboundFormSettings) {
   const fragmentEntries = Object.entries(fragment).filter(([, v]) => v !== '' && v != null);
   const fragmentEnabled = !!fragment.length || !!fragment.interval || !!fragment.maxSplit;
   return {
-    domainStrategy: s.domainStrategy || undefined,
     redirect: s.redirect || undefined,
     userLevel: s.userLevel || undefined,
     proxyProtocol: s.proxyProtocol || undefined,
@@ -688,7 +745,7 @@ export function formValuesToWirePayload(values: OutboundFormValues): WireOutboun
     settings,
   };
   if (values.tag) result.tag = values.tag;
-  if (values.targetStrategy) result.targetStrategy = values.targetStrategy;
+  if (values.targetStrategy && values.protocol !== 'freedom') result.targetStrategy = values.targetStrategy;
 
   // streamSettings emission gates on canEnableStream — non-stream protocols
   // still emit just `sockopt` if that key is present (legacy behavior).
@@ -696,9 +753,29 @@ export function formValuesToWirePayload(values: OutboundFormValues): WireOutboun
     if (STREAM_PROTOCOLS.has(values.protocol)) {
       result.streamSettings = stripUiOnlyStreamFields(values.streamSettings);
     } else {
-      const sockopt = (values.streamSettings as { sockopt?: unknown }).sockopt;
-      if (sockopt) result.streamSettings = { sockopt };
+      const { sockopt, finalmask } = values.streamSettings as { sockopt?: unknown; finalmask?: unknown };
+      const stream: Raw = {};
+      if (sockopt) stream.sockopt = sockopt;
+      if (values.protocol === 'wireguard' && finalmask && typeof finalmask === 'object') {
+        stream.finalmask = { ...(finalmask as Raw) };
+        dropEmptyFinalMask(stream);
+      }
+      if (Object.keys(stream).length > 0) result.streamSettings = stream;
     }
+  }
+
+  // Freedom only honours sockopt.domainStrategy; the root and settings keys are
+  // legacy aliases the loader warns about on every start (infra/conf/xray.go).
+  if (values.protocol === 'freedom') {
+    const stream = (result.streamSettings ?? {}) as Raw;
+    const sockopt = asObject(stream.sockopt);
+    const strategy = values.settings.domainStrategy || values.targetStrategy;
+    if (strategy && strategy !== 'AsIs') sockopt.domainStrategy = strategy;
+    else delete sockopt.domainStrategy;
+    if (Object.keys(sockopt).length > 0) stream.sockopt = sockopt;
+    else delete stream.sockopt;
+    if (Object.keys(stream).length > 0) result.streamSettings = stream;
+    else delete result.streamSettings;
   }
 
   if (values.sendThrough) result.sendThrough = values.sendThrough;

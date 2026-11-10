@@ -279,11 +279,31 @@ export function normalizeSockoptForWire(
   return out;
 }
 
+// Emit `finalmask` only when a mask exists (legacy `hasFinalMask`), and drop an empty
+// sub-array beside a populated one so the payload carries no stray `"tcp": []`.
+export function dropEmptyFinalMask(stream: Record<string, unknown>): void {
+  const fm = stream.finalmask as { tcp?: unknown[]; udp?: unknown[]; quicParams?: unknown };
+  if (!fm || typeof fm !== 'object') return;
+  const hasTcp = Array.isArray(fm.tcp) && fm.tcp.length > 0;
+  const hasUdp = Array.isArray(fm.udp) && fm.udp.length > 0;
+  if (!hasTcp && !hasUdp && fm.quicParams == null) {
+    delete stream.finalmask;
+    return;
+  }
+  if (!hasTcp) delete fm.tcp;
+  if (!hasUdp) delete fm.udp;
+}
+
 export function normalizeStreamSettingsForWire(
   stream: Record<string, unknown>,
   opts: { side: StreamWireSide },
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...stream };
+	if (isRecord(out.finalmask)) {
+		const finalmask = { ...out.finalmask };
+		if (Array.isArray(finalmask.udp)) finalmask.udp = upgradeLegacyXdnsMasks(finalmask.udp).next;
+		out.finalmask = finalmask;
+	}
 
   const xhttp = out.xhttpSettings;
   if (isRecord(xhttp)) {
@@ -307,3 +327,4 @@ export function normalizeStreamSettingsForWire(
 
   return out;
 }
+import { upgradeLegacyXdnsMasks } from './xdns-mask';

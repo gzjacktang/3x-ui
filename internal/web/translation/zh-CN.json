@@ -125,6 +125,8 @@
       "deployTo": "部署到",
       "localPanel": "本地面板",
       "fallbacks": {
+        "saveFailed": "读取或保存回落规则失败，请重试。",
+        "decryptionConflict": "VLESS ENC 不能与回落同时启用。请先删除回落规则，再保存 ENC 设置。",
         "title": "Fallbacks",
         "help": "当此入站的连接未匹配任何客户端时，将其路由到其他位置。在下方选择一个子入站，可从其传输方式自动填充路由字段（SNI / ALPN / Path / xver）；或将选择框留空并直接设置 Dest（例如 8080 或 127.0.0.1:8080），以路由到 Nginx 等外部服务器。每个子入站应监听 127.0.0.1，security=none。",
         "empty": "暂无回落",

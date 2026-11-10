@@ -62,11 +62,11 @@ func (cronPanicLogger) Printf(format string, args ...any) { logger.Errorf(format
 // under `dist/assets/`; serving the FS rooted at `dist/assets` makes
 // `/assets/<hash>.js` URLs resolve directly.
 type wrapDistFS struct {
-	embed.FS
+	dist embed.FS
 }
 
 func (f *wrapDistFS) Open(name string) (fs.File, error) {
-	file, err := f.FS.Open("dist/assets/" + name)
+	file, err := f.dist.Open("dist/assets/" + name)
 	if err != nil {
 		return nil, err
 	}
@@ -186,8 +186,8 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine.Use(gzip.Gzip(gzip.DefaultCompression))
 	assetsBasePath := basePath + "assets/"
+	engine.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{assetsBasePath})))
 
 	store := cookie.NewStore(secret)
 	// Configure default session cookie options, including expiration (MaxAge)
@@ -225,11 +225,11 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	// so the Vite watcher's incremental rebuilds show up without
 	// restarting the binary; in prod we serve the embedded dist FS
 	// rooted at `dist/assets/`.
+	var assetsFS fs.FS = &wrapDistFS{dist: distFS}
 	if config.IsDebug() {
-		engine.StaticFS(basePath+"assets", http.FS(os.DirFS("internal/web/dist/assets")))
-	} else {
-		engine.StaticFS(basePath+"assets", http.FS(&wrapDistFS{FS: distFS}))
+		assetsFS = os.DirFS("internal/web/dist/assets")
 	}
+	engine.Group(basePath+"assets", middleware.GzipStatic(assetsFS)).StaticFS("/", http.FS(assetsFS))
 
 	// Hand the embedded `dist/` filesystem to the controller package
 	// before any HTML-serving controller is constructed. Phase 8
@@ -440,6 +440,7 @@ func (s *Server) start(restartXray bool) (err error) {
 	if err != nil {
 		return err
 	}
+	listener = network.NewLimitListener(listener, network.MaxPanelConns, network.MaxPanelConnsPerSource)
 	if certFile != "" || keyFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err == nil {
@@ -476,7 +477,7 @@ func (s *Server) start(restartXray bool) (err error) {
 	}
 
 	go func() {
-		_ = s.httpServer.Serve(listener)
+		network.ServeHTTP(s.httpServer, listener, "Panel")
 	}()
 
 	s.startTask(restartXray)

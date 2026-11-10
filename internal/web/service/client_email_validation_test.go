@@ -16,6 +16,8 @@ func TestValidateClientEmail(t *testing.T) {
 	}
 
 	invalid := []string{
+		".",
+		"..",
 		"i6dui/",
 		"a/b",
 		"client with spaces",

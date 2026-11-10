@@ -39,6 +39,11 @@ func TestAutoRenewClients_MultiInbound(t *testing.T) {
 	if err := svc.clientService.SyncInbound(nil, ib2.Id, ib2Clients); err != nil {
 		t.Fatalf("SyncInbound ib2: %v", err)
 	}
+	// Represent quota-loop/legacy stops rather than newly created off clients.
+	if err := db.Model(&model.ClientRecord{}).Where("email IN ?", []string{"a@x", "b@x", "c@x"}).
+		UpdateColumn("manual_disabled", false).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	// Seed traffic rows: expired+depleted for the three renewable clients, and a
 	// healthy row for keep@x.

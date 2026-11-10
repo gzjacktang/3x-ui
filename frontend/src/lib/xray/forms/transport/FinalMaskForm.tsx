@@ -9,6 +9,8 @@ import { RandomUtil } from '@/utils';
 import { activateOnKey } from '@/utils/a11y';
 import { OutboundProtocols, UTLS_FINGERPRINT } from '@/schemas/primitives';
 
+import { upgradeLegacyXdnsMasks, XDNS_LEGACY_EDNS0 } from '@/lib/xray/xdns-mask';
+
 const UTLS_FINGERPRINT_OPTIONS = Object.values(UTLS_FINGERPRINT).map((value) => ({ value, label: value }));
 
 export interface FinalMaskFormProps {
@@ -178,7 +180,7 @@ export default function FinalMaskForm({ name, network, protocol, form, showAll =
     if (migratedRef.current) return;
     migratedRef.current = true;
     const tcp = form.getFieldValue([...base, 'tcp']);
-    if (!Array.isArray(tcp)) return;
+    if (Array.isArray(tcp)) {
     let anyChanged = false;
     const next = tcp.map((mask) => {
       if (!mask || typeof mask !== 'object') return mask;
@@ -190,6 +192,12 @@ export default function FinalMaskForm({ name, network, protocol, form, showAll =
       return { ...m, settings: migrated };
     });
     if (anyChanged) form.setFieldValue([...base, 'tcp'], next);
+    }
+    const udp = form.getFieldValue([...base, 'udp']);
+    if (Array.isArray(udp)) {
+      const { next, changed } = upgradeLegacyXdnsMasks(udp);
+      if (changed) form.setFieldValue([...base, 'udp'], next);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -723,13 +731,7 @@ function UdpMaskItem({
               </>
             );
           }
-          if (type === 'xdns') {
-            return (
-              <Form.Item label="Domains" name={[fieldName, 'settings', 'domains']}>
-                <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',']} />
-              </Form.Item>
-            );
-          }
+          if (type === 'xdns') return <XdnsSettings udpFieldName={fieldName} />;
           if (type === 'xicmp') {
             return (
               <>
@@ -966,6 +968,122 @@ function UdpHeaderCustom({
     </>
   );
 }
+
+const XDNS_RECORD_TYPE_OPTIONS = [
+  { value: 16, label: 'TXT' },
+  { value: 1, label: 'A' },
+  { value: 28, label: 'AAAA' },
+  { value: 5, label: 'CNAME' },
+];
+
+// Every xdns key needs a registered field: the finalmask watch drops keys without one.
+// Resolvers and extraPoll are read by clients only; a server keeps them for the share link.
+function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Form.List name={[udpFieldName, 'settings', 'domains']}>
+        {(domains, { add, remove }) => (
+          <>
+            <Form.Item label="Domains">
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined aria-hidden />}
+                aria-label={t('add')}
+                onClick={() => add({ names: [], edns0: XDNS_LEGACY_EDNS0 })}
+              />
+            </Form.Item>
+            {domains.map((domain, di) => (
+              <div key={domain.key}>
+                <Divider style={{ margin: 0 }}>
+                  Domain {di + 1}
+                  <DeleteOutlined
+                    className="danger-icon"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t('remove')}
+                    onClick={() => remove(domain.name)}
+                    onKeyDown={activateOnKey(() => remove(domain.name))}
+                  />
+                </Divider>
+                <Form.Item label="Names" name={[domain.name, 'names']}>
+                  <Select
+                    mode="tags"
+                    style={{ width: '100%' }}
+                    tokenSeparators={[',']}
+                    placeholder="t.example.com"
+                  />
+                </Form.Item>
+                <Form.Item label="Record Types" name={[domain.name, 'types']}>
+                  <Select
+                    mode="multiple"
+                    options={XDNS_RECORD_TYPE_OPTIONS}
+                    placeholder="TXT (client), all (server)"
+                  />
+                </Form.Item>
+                <Form.Item label="EDNS0" name={[domain.name, 'edns0']}>
+                  <InputNumber min={512} max={4096} placeholder="off" />
+                </Form.Item>
+                <Form.Item label="Length Limit" name={[domain.name, 'lenLimit']}>
+                  <InputNumber min={0} max={255} placeholder="255" />
+                </Form.Item>
+                <Form.Item label="Label Limit" name={[domain.name, 'labelLimit']}>
+                  <InputNumber min={0} max={63} placeholder="63" />
+                </Form.Item>
+              </div>
+            ))}
+          </>
+        )}
+      </Form.List>
+      <Form.List name={[udpFieldName, 'settings', 'resolvers']}>
+        {(resolvers, { add, remove }) => (
+          <>
+            <Form.Item label="Resolvers (client)">
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined aria-hidden />}
+                aria-label={t('add')}
+                onClick={() => add({ addrs: [] })}
+              />
+            </Form.Item>
+            {resolvers.map((resolver, ri) => (
+              <div key={resolver.key}>
+                <Divider style={{ margin: 0 }}>
+                  Resolver {ri + 1}
+                  <DeleteOutlined
+                    className="danger-icon"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t('remove')}
+                    onClick={() => remove(resolver.name)}
+                    onKeyDown={activateOnKey(() => remove(resolver.name))}
+                  />
+                </Divider>
+                <Form.Item label="Addresses" name={[resolver.name, 'addrs']}>
+                  <Select
+                    mode="tags"
+                    style={{ width: '100%' }}
+                    tokenSeparators={[',', ' ']}
+                    placeholder="udp://8.8.8.8:53, https://dns.google/dns-query"
+                  />
+                </Form.Item>
+                <Form.Item label="Workers" name={[resolver.name, 'worker']}>
+                  <InputNumber min={1} placeholder="32" />
+                </Form.Item>
+              </div>
+            ))}
+          </>
+        )}
+      </Form.List>
+      <Form.Item label="Extra Poll (client)" name={[udpFieldName, 'settings', 'extraPoll']}>
+        <InputNumber min={0} max={3} placeholder="0" />
+      </Form.Item>
+    </>
+  );
+}
+
 
 function NoiseItems({
   udpFieldName, form, absoluteSettingsPath,

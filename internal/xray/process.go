@@ -635,6 +635,7 @@ func (p *process) waitForCommand(cmd *exec.Cmd, done chan struct{}) {
 	defer close(done)
 
 	err := cmd.Wait()
+	p.logWriter.Flush()
 	if err == nil || p.intentionalStop.Load() {
 		return
 	}
@@ -740,8 +741,19 @@ func writeCrashReport(m []byte) error {
 		return err
 	}
 	pruneOldCrashReports(dir, maxCrashReports-1)
-	name := crashReportPrefix + time.Now().Format("20060102_150405_000000000") + crashReportSuffix
-	return os.WriteFile(filepath.Join(dir, name), m, 0o640)
+	pattern := crashReportPrefix + time.Now().Format("20060102_150405") + "_*" + crashReportSuffix
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(m)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(f.Name(), 0o640)
+	}
+	return err
 }
 
 func pruneOldCrashReports(dir string, keep int) {

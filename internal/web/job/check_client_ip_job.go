@@ -643,12 +643,36 @@ func (j *CheckClientIpJob) disconnectClientTemporarily(inbound *model.Inbound, c
 
 	// Wait a moment for disconnection to take effect
 	time.Sleep(100 * time.Millisecond)
+	if !j.clientStillServed(inbound.Id, clientEmail) {
+		logger.Infof("[LIMIT_IP] Not restoring %s: disabled or removed during its temporary disconnect", clientEmail)
+		return
+	}
 
 	// Re-add user to allow new connections
 	err = xrayAPI.AddUser(protocol, inbound.Tag, clientConfig)
 	if err != nil {
 		logger.Warningf("[LIMIT_IP] Failed to re-add user %s: %v", clientEmail, err)
+		return
 	}
+	// Catch a disable/detach committed between the first check and AddUser.
+	if !j.clientStillServed(inbound.Id, clientEmail) {
+		if err := xrayAPI.RemoveUser(inbound.Tag, clientEmail); err != nil {
+			logger.Warningf("[LIMIT_IP] Failed to remove user %s again: %v", clientEmail, err)
+		}
+	}
+}
+
+func (j *CheckClientIpJob) clientStillServed(inboundID int, email string) bool {
+	var served int64
+	err := database.GetDB().Table("client_inbounds").
+		Joins("JOIN clients ON clients.id = client_inbounds.client_id").
+		Joins("JOIN inbounds ON inbounds.id = client_inbounds.inbound_id").
+		Where("client_inbounds.inbound_id = ? AND inbounds.enable = ?", inboundID, true).
+		Where("clients.email = ? AND clients.enable = ?", email, true).
+		Where("NOT EXISTS (SELECT 1 FROM client_traffics WHERE client_traffics.email = clients.email AND client_traffics.enable = ?)", false).
+		Count(&served).Error
+	j.checkError(err)
+	return err == nil && served > 0
 }
 
 // resolveXrayAPIPort returns the API inbound port from running config, then template config, then default.

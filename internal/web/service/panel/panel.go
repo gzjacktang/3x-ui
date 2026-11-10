@@ -246,6 +246,7 @@ func (s *PanelService) startUpdate(useDev bool) (int64, error) {
 	}
 
 	statusFile := config.GetUpdateStatusFilePath()
+	proxyEnv := "XUI_UPDATE_PROXY=" + (&service.SettingService{}).PanelEgressProxyURL()
 
 	mainFolder, serviceFolder := resolveUpdateFolders()
 	updateTag := ""
@@ -265,6 +266,7 @@ func (s *PanelService) startUpdate(useDev bool) (int64, error) {
 			"--setenv", "XUI_UPDATE_TAG="+updateTag,
 			"--setenv", runIDEnv,
 			"--setenv", statusFileEnv,
+			"--setenv", proxyEnv,
 			bash, "-lc", updateScript,
 		)
 		out, err := cmd.CombinedOutput()
@@ -290,6 +292,7 @@ func (s *PanelService) startUpdate(useDev bool) (int64, error) {
 		"XUI_UPDATE_TAG="+updateTag,
 		runIDEnv,
 		statusFileEnv,
+		proxyEnv,
 	)
 	setDetachedProcess(cmd)
 	if err := cmd.Start(); err != nil {

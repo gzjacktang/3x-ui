@@ -23,21 +23,37 @@ func getRemoteIp(c *gin.Context) string {
 		return "unknown"
 	}
 
-	if isTrustedProxy(remoteIP) {
-		if ip, ok := extractTrustedIP(c.GetHeader("X-Real-IP")); ok {
-			return ip
-		}
+	if !isTrustedProxy(remoteIP) {
+		return remoteIP
+	}
+	realIP, hasRealIP := extractTrustedIP(c.GetHeader("X-Real-IP"))
+	forwardedIP, hasForwarded := forwardedForClient(c.GetHeader("X-Forwarded-For"))
+	switch {
+	case hasRealIP && hasForwarded && realIP != forwardedIP:
+		return remoteIP
+	case hasForwarded:
+		return forwardedIP
+	case hasRealIP:
+		return realIP
+	}
+	return remoteIP
+}
 
-		if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
-			for part := range strings.SplitSeq(xff, ",") {
-				if ip, ok := extractTrustedIP(part); ok {
-					return ip
-				}
-			}
+// Walk from the proxy end; client-supplied entries precede the trusted hops.
+func forwardedForClient(xff string) (string, bool) {
+	parts := strings.Split(xff, ",")
+	client := ""
+	for i := len(parts) - 1; i >= 0; i-- {
+		ip, ok := extractTrustedIP(parts[i])
+		if !ok {
+			break
+		}
+		client = ip
+		if !isTrustedProxy(ip) {
+			break
 		}
 	}
-
-	return remoteIP
+	return client, client != ""
 }
 
 func isTrustedForwardedRequest(c *gin.Context) bool {

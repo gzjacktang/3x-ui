@@ -51,11 +51,6 @@ func Dialect() string {
 	return db.Name()
 }
 
-const (
-	defaultUsername = "admin"
-	defaultPassword = "admin"
-)
-
 func allModels() []any {
 	return []any{
 		&model.User{},
@@ -876,26 +871,22 @@ func isIgnorableDuplicateColumnErr(gdb *gorm.DB, err error, mdl any) bool {
 	return false
 }
 
-func initUser() error {
+// EnsureFirstUser is called by the server, which can print the generated login
+// once. CLI database initialization must not silently create a default account.
+func EnsureFirstUser() (username, password string, err error) {
 	empty, err := isTableEmpty("users")
+	if err != nil || !empty {
+		return "", "", err
+	}
+	username, password = random.Seq(10), random.Seq(16)
+	hashedPassword, err := crypto.HashPasswordAsBcrypt(password)
 	if err != nil {
-		log.Printf("Error checking if users table is empty: %v", err)
-		return err
+		return "", "", err
 	}
-	if empty {
-		hashedPassword, err := crypto.HashPasswordAsBcrypt(defaultPassword)
-		if err != nil {
-			log.Printf("Error hashing default password: %v", err)
-			return err
-		}
-
-		user := &model.User{
-			Username: defaultUsername,
-			Password: hashedPassword,
-		}
-		return db.Create(user).Error
+	if err := db.Create(&model.User{Username: username, Password: hashedPassword}).Error; err != nil {
+		return "", "", err
 	}
-	return nil
+	return username, password, nil
 }
 
 func runSeeders(isUsersEmpty bool) error {
@@ -906,11 +897,14 @@ func runSeeders(isUsersEmpty bool) error {
 	}
 
 	if empty && isUsersEmpty {
-		seeders := []string{"UserPasswordHash", "ClientsTable", "InboundClientsArrayFix", "InboundClientTgIdFix2", "InboundClientSubIdFix", "FreedomFinalRulesReverseFix", "ApiTokensHash", "LegacyProxySettingsCleanup", "WireguardPeersToClients", "MtprotoSecretsToClients", "NodeInboundsAdopted", "ResetIpLimitNoFail2ban"}
+		seeders := []string{"UserPasswordHash", "ClientsTable", "InboundClientsArrayFix", "InboundClientTgIdFix2", "InboundClientSubIdFix", "FreedomFinalRulesReverseFix", "ApiTokensHash", "LegacyProxySettingsCleanup", "WireguardPeersToClients", "MtprotoSecretsToClients", "NodeInboundsAdopted", "ResetIpLimitNoFail2ban", "FreedomDomainStrategyFix", "DNSOutboundLegacyKeysFix", "DNSOutboundQTypeZeroFix", "WireguardDomainStrategyFix", "XdnsFinalmaskNamesAddrsFix"}
 		for _, name := range seeders {
 			if err := db.Create(&model.HistoryOfSeeders{SeederName: name}).Error; err != nil {
 				return err
 			}
+		}
+		if err := db.Create(&model.HistoryOfSeeders{SeederName: "SessionSecretRotation"}).Error; err != nil {
+			return err
 		}
 		return seedApiTokens()
 	}
@@ -996,6 +990,33 @@ func runSeeders(isUsersEmpty bool) error {
 	if !slices.Contains(seedersHistory, "LegacyProxySettingsCleanup") {
 		if err := clearLegacyProxySettings(); err != nil {
 			return err
+		}
+	}
+	if !slices.Contains(seedersHistory, "SessionSecretRotation") {
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("key = ?", "secret").Delete(&model.Setting{}).Error; err != nil {
+				return err
+			}
+			return tx.Create(&model.HistoryOfSeeders{SeederName: "SessionSecretRotation"}).Error
+		}); err != nil {
+			return err
+		}
+	}
+
+	for _, migration := range []struct {
+		name string
+		run  func() error
+	}{
+		{"FreedomDomainStrategyFix", migrateFreedomDomainStrategy},
+		{"DNSOutboundLegacyKeysFix", migrateDNSOutboundLegacyKeys},
+		{"DNSOutboundQTypeZeroFix", migrateDNSOutboundQTypeZero},
+		{"WireguardDomainStrategyFix", migrateWireguardDomainStrategy},
+		{"XdnsFinalmaskNamesAddrsFix", migrateXdnsFinalmaskShape},
+	} {
+		if !slices.Contains(seedersHistory, migration.name) {
+			if err := migration.run(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1464,6 +1485,9 @@ func seedClientsFromInboundJSON() error {
 					continue
 				}
 				normalizeClientJSONFields(obj)
+				if obj["enable"] == nil {
+					obj["enable"] = true
+				}
 				blob, err := json.Marshal(obj)
 				if err != nil {
 					continue
@@ -1484,6 +1508,14 @@ func seedClientsFromInboundJSON() error {
 				if !dup {
 					if err := tx.Create(incoming).Error; err != nil {
 						return err
+					}
+					// GORM's default:true replaces an explicit false on Create.
+					// Keep the legacy operator's disabled state during migration.
+					if !c.Enable {
+						if err := tx.Model(incoming).UpdateColumn("enable", false).Error; err != nil {
+							return err
+						}
+						incoming.Enable = false
 					}
 					byEmail[email] = incoming
 					row = incoming
@@ -1591,7 +1623,7 @@ func InitDB(dbPath string) error {
 		}
 	default:
 		dir := path.Dir(dbPath)
-		if err = os.MkdirAll(dir, 0o755); err != nil {
+		if err = os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
 
@@ -1600,6 +1632,9 @@ func InitDB(dbPath string) error {
 		db, err = gorm.Open(sqlite.Open(dsn), c)
 		if err != nil {
 			return err
+		}
+		if err := restrictSQLiteFilePerms(dbPath); err != nil {
+			log.Printf("restrict SQLite file permissions: %v", err)
 		}
 		sqlDB, err := db.DB()
 		if err != nil {
@@ -1648,10 +1683,16 @@ func InitDB(dbPath string) error {
 		return err
 	}
 
-	if err := initUser(); err != nil {
-		return err
-	}
 	return runSeeders(isUsersEmpty)
+}
+
+func restrictSQLiteFilePerms(dbPath string) error {
+	for _, name := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		if err := os.Chmod(name, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 func normalizeApiTokenCreatedAtSeconds() error {

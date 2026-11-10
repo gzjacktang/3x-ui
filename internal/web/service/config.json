@@ -31,7 +31,6 @@
   "outbounds": [{
       "protocol": "freedom",
       "settings": {
-        "domainStrategy": "AsIs",
         "finalRules": [
           { "action": "allow" }
         ]

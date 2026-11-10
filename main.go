@@ -19,11 +19,11 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/tunnelmonitor"
-	"github.com/mhsanaei/3x-ui/v3/internal/util/crypto"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/netpolicy"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/sys"
 	"github.com/mhsanaei/3x-ui/v3/internal/web"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/global"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/network"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service/panel"
 
@@ -64,15 +64,20 @@ func runWebServer() {
 				logger.Warning("pprof listener failed: ", err)
 				return
 			}
-			if err := http.Serve(listener, nil); err != nil {
-				logger.Warning("pprof server stopped: ", err)
-			}
+			network.ServeHTTP(&http.Server{ReadHeaderTimeout: 5 * time.Second}, listener, "pprof")
 		}()
 	}
 
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
+	}
+	username, password, err := database.EnsureFirstUser()
+	if err != nil {
+		log.Fatalf("Error creating initial login: %v", err)
+	}
+	if username != "" {
+		log.Printf("Initial panel username: %s\nInitial panel password: %s", username, password)
 	}
 
 	var server *web.Server
@@ -196,13 +201,10 @@ func showSetting(show bool) {
 		}
 
 		userService := panel.UserService{}
-		userModel, err := userService.GetFirstUser()
+		hasDefaultCredential, err := userService.HasDefaultCredential()
 		if err != nil {
 			fmt.Println("get current user info failed, error info:", err)
-		}
-
-		if userModel.Username == "" || userModel.Password == "" {
-			fmt.Println("current username or password is empty")
+			return
 		}
 
 		fmt.Println("current panel settings as follows:")
@@ -211,10 +213,6 @@ func showSetting(show bool) {
 		} else {
 			fmt.Println("Panel is secure with SSL")
 		}
-
-		hasDefaultCredential := func() bool {
-			return userModel.Username == "admin" && crypto.CheckPasswordHash(userModel.Password, "admin")
-		}()
 
 		fmt.Println("hasDefaultCredential:", hasDefaultCredential)
 		fmt.Println("port:", port)

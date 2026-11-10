@@ -2,10 +2,10 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/websocket"
 
@@ -47,11 +47,14 @@ func NewClientController(g *gin.RouterGroup) *ClientController {
 func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.GET("/list", a.list)
 	g.GET("/list/paged", a.listPaged)
+	g.GET("/get", a.get)
 	g.GET("/get/:email", a.get)
 	g.GET("/traffic/:email", a.getTrafficByEmail)
 
 	g.POST("/add", a.create)
+	g.POST("/update", a.update)
 	g.POST("/update/:email", a.update)
+	g.POST("/del", a.delete)
 	g.POST("/del/:email", a.delete)
 	g.POST("/:email/attach", a.attach)
 	g.POST("/:email/detach", a.detach)
@@ -103,8 +106,23 @@ func (a *ClientController) listPaged(c *gin.Context) {
 	jsonObj(c, resp, nil)
 }
 
-func (a *ClientController) get(c *gin.Context) {
+func clientEmailParam(c *gin.Context) (string, bool) {
 	email := c.Param("email")
+	if email == "" {
+		email = c.Query("email")
+	}
+	if email == "" {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), errors.New("client email is required"))
+		return "", false
+	}
+	return email, true
+}
+
+func (a *ClientController) get(c *gin.Context) {
+	email, ok := clientEmailParam(c)
+	if !ok {
+		return
+	}
 	rec, err := a.clientService.GetRecordByEmail(nil, email)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "get"), err)
@@ -155,27 +173,33 @@ func (a *ClientController) create(c *gin.Context) {
 }
 
 func (a *ClientController) update(c *gin.Context) {
-	email := c.Param("email")
-	var updated model.Client
-	if err := c.ShouldBindJSON(&updated); err != nil {
+	email, ok := clientEmailParam(c)
+	if !ok {
+		return
+	}
+	body, err := c.GetRawData()
+	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
 	inboundFilter := parseInboundIdsQuery(c.Query("inboundIds"))
-	needRestart, err := a.clientService.UpdateByEmail(&a.inboundService, email, updated, inboundFilter...)
+	needRestart, err := a.clientService.UpdateByEmailJSON(&a.inboundService, email, body, inboundFilter...)
+	if needRestart {
+		a.xrayService.SetToNeedRestart()
+	}
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
 	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientUpdateSuccess"), pendingNodeObj(a.clientService.HasPendingNode(&a.inboundService, email)), nil)
-	if needRestart {
-		a.xrayService.SetToNeedRestart()
-	}
 	notifyClientsChanged()
 }
 
 func (a *ClientController) delete(c *gin.Context) {
-	email := c.Param("email")
+	email, ok := clientEmailParam(c)
+	if !ok {
+		return
+	}
 	keepTraffic := c.Query("keepTraffic") == "1"
 	needRestart, err := a.clientService.DeleteByEmail(&a.inboundService, email, keepTraffic)
 	if err != nil {

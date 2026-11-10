@@ -9,11 +9,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/util/maskcompat"
 )
 
 // Outbound is the minimal shape we emit for each parsed link.
@@ -131,17 +134,12 @@ func ParseLink(link string) (*ParseResult, error) {
 
 func parseVmess(link string) (*ParseResult, error) {
 	b64 := strings.TrimPrefix(link, "vmess://")
-	// vmess:// base64(json)
-	raw, err := base64.StdEncoding.DecodeString(padBase64(b64))
-	if err != nil {
-		// Some providers use raw URL-safe
-		raw, err = base64.RawURLEncoding.DecodeString(b64)
-	}
+	raw, err := base64DecodeFlexible(b64)
 	if err != nil {
 		return nil, fmt.Errorf("vmess decode: %w", err)
 	}
 	var j map[string]any
-	if err := json.Unmarshal(raw, &j); err != nil {
+	if err := json.Unmarshal([]byte(raw), &j); err != nil {
 		return nil, fmt.Errorf("vmess json: %w", err)
 	}
 
@@ -162,10 +160,10 @@ func parseVmess(link string) (*ParseResult, error) {
 	case "grpc":
 		svc := getString(j, "path", "")
 		if auth, ok := j["authority"].(string); ok && auth != "" {
-			(stream["grpcSettings"].(map[string]any))["authority"] = auth
+			stream["grpcSettings"].(map[string]any)["authority"] = auth
 		}
-		(stream["grpcSettings"].(map[string]any))["serviceName"] = svc
-		(stream["grpcSettings"].(map[string]any))["multiMode"] = getString(j, "type", "") == "multi"
+		stream["grpcSettings"].(map[string]any)["serviceName"] = svc
+		stream["grpcSettings"].(map[string]any)["multiMode"] = getString(j, "type", "") == "multi"
 	case "httpupgrade":
 		setHTTPUpgrade(stream, getString(j, "host", ""), getString(j, "path", "/"))
 	case "xhttp":
@@ -277,7 +275,7 @@ func parseVless(link string) (*ParseResult, error) {
 
 	ob := Outbound{
 		"protocol": "vless",
-		"tag":      decodeHash(u.Fragment),
+		"tag":      decodeHash(u.EscapedFragment()),
 		"settings": map[string]any{
 			"address":    host,
 			"port":       port,
@@ -319,7 +317,7 @@ func parseTrojan(link string) (*ParseResult, error) {
 
 	ob := Outbound{
 		"protocol": "trojan",
-		"tag":      decodeHash(u.Fragment),
+		"tag":      decodeHash(u.EscapedFragment()),
 		"settings": map[string]any{
 			"servers": []any{
 				map[string]any{"address": host, "port": port, "password": pw},
@@ -338,7 +336,7 @@ func parseShadowsocks(link string) (*ParseResult, error) {
 	//   ss://base64(method:pass@host:port)#remark
 	remark := ""
 	if i := strings.Index(link, "#"); i >= 0 {
-		remark, _ = url.QueryUnescape(link[i+1:])
+		remark = decodeHash(link[i+1:])
 		link = link[:i]
 	}
 	if i := strings.Index(link, "?"); i >= 0 {
@@ -461,7 +459,7 @@ func parseHysteria2(link string) (*ParseResult, error) {
 
 	ob := Outbound{
 		"protocol":       "hysteria",
-		"tag":            decodeHash(u.Fragment),
+		"tag":            decodeHash(u.EscapedFragment()),
 		"settings":       map[string]any{"address": host, "port": port, "version": 2},
 		"streamSettings": stream,
 	}
@@ -478,13 +476,13 @@ func parseWireguard(link string) (*ParseResult, error) {
 	if u.Scheme != "wireguard" && u.Scheme != "wg" {
 		return nil, fmt.Errorf("not wireguard")
 	}
-	secret, _ := url.QueryUnescape(u.User.Username())
+	secret := u.User.Username()
 	params := u.Query()
 	host := u.Hostname()
 	portStr := u.Port()
 	endpoint := host
 	if portStr != "" {
-		endpoint = host + ":" + portStr
+		endpoint = net.JoinHostPort(host, portStr)
 	}
 
 	addrRaw := firstParam(params, "address", "ip")
@@ -539,7 +537,7 @@ func parseWireguard(link string) (*ParseResult, error) {
 
 	ob := Outbound{
 		"protocol": "wireguard",
-		"tag":      decodeHash(u.Fragment),
+		"tag":      decodeHash(u.EscapedFragment()),
 		"settings": settings,
 	}
 	return &ParseResult{Outbound: ob, Identity: identity}, nil
@@ -682,6 +680,7 @@ func applyFinalMask(stream map[string]any, p url.Values) {
 		var parsed any
 		if json.Unmarshal([]byte(fm), &parsed) == nil {
 			sanitizeFinalMaskQuicParams(parsed)
+			maskcompat.UpgradeLegacyXdns(parsed)
 			stream["finalmask"] = parsed
 		}
 	}
@@ -809,7 +808,7 @@ func decodeHash(h string) string {
 	if h == "" {
 		return ""
 	}
-	if dec, err := url.QueryUnescape(h); err == nil {
+	if dec, err := url.PathUnescape(h); err == nil {
 		return dec
 	}
 	return h

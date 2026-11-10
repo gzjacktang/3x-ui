@@ -20,7 +20,7 @@ import (
 )
 
 func (s *InboundService) AddTraffic(inboundTraffics []*xray.Traffic, clientTraffics []*xray.ClientTraffic) (needRestart bool, clientsDisabled bool, err error) {
-	err = submitTrafficWrite(func() error {
+	err = submitTrafficWriteBackground(func() error {
 		var inner error
 		needRestart, clientsDisabled, inner = s.addTrafficLocked(inboundTraffics, clientTraffics)
 		return inner
@@ -354,8 +354,16 @@ func (s *InboundService) autoRenewClients(tx *gorm.DB) (bool, int64, error) {
 	// instead of a linear scan of every expired row (O(clients × expired) per
 	// inbound, quadratic at scale). Pointers keep the in-place mutation below.
 	trafficByEmail := make(map[string]*xray.ClientTraffic, len(traffics))
+	var switchedOff []xray.ClientTraffic
 	for i := range traffics {
 		trafficByEmail[traffics[i].Email] = traffics[i]
+		if !traffics[i].Enable {
+			switchedOff = append(switchedOff, *traffics[i])
+		}
+	}
+	lifecycleDisabled, err := lifecycleDisabledEmails(tx, switchedOff)
+	if err != nil {
+		return false, 0, err
 	}
 	for inbound_index := range inbounds {
 		settings := map[string]any{}
@@ -372,14 +380,14 @@ func (s *InboundService) autoRenewClients(tx *gorm.DB) (bool, int64, error) {
 				continue
 			}
 			newExpiryTime := traffic.ExpiryTime
-			for newExpiryTime < now {
+			for newExpiryTime <= now {
 				newExpiryTime += (int64(traffic.Reset) * 86400000)
 			}
 			c["expiryTime"] = newExpiryTime
 			traffic.ExpiryTime = newExpiryTime
 			traffic.Down = 0
 			traffic.Up = 0
-			if !traffic.Enable {
+			if _, restore := lifecycleDisabled[email]; restore {
 				traffic.Enable = true
 				c["enable"] = true
 				clientsToAdd = append(clientsToAdd,
@@ -505,12 +513,14 @@ func (s *InboundService) delClientStatsByEmails(tx *gorm.DB, emails []string) er
 func (s *InboundService) ResetClientTrafficByEmail(clientEmail string) error {
 	err := submitTrafficWrite(func() error {
 		return database.GetDB().Transaction(func(tx *gorm.DB) error {
-			if err := clearGlobalTraffic(tx, clientEmail); err != nil {
+			keepOff, err := handDisabledEmails(tx, []string{clientEmail})
+			if err != nil {
 				return err
 			}
-			if err := tx.Model(xray.ClientTraffic{}).
-				Where("email = ?", clientEmail).
-				Updates(map[string]any{"enable": true, "up": 0, "down": 0}).Error; err != nil {
+			if _, err := zeroClientTraffics(tx, []string{clientEmail}, keepOff); err != nil {
+				return err
+			}
+			if err := clearGlobalTraffic(tx, clientEmail); err != nil {
 				return err
 			}
 			return tx.Where("email = ?", clientEmail).Delete(&model.NodeClientTraffic{}).Error
@@ -536,13 +546,20 @@ func (s *InboundService) ResetClientTraffic(id int, clientEmail string) (needRes
 
 func (s *InboundService) resetClientTrafficLocked(id int, clientEmail string) (bool, error) {
 	needRestart := false
+	var applyRuntime func()
 
 	traffic, err := s.GetClientTrafficByEmail(clientEmail)
 	if err != nil {
 		return false, err
 	}
 
-	if !traffic.Enable {
+	keepOff, err := handDisabledEmails(database.GetDB(), []string{clientEmail})
+	if err != nil {
+		return false, err
+	}
+	handDisabled := len(keepOff) > 0
+	flipStoredEntry := false
+	if !handDisabled {
 		inbound, err := s.GetInbound(id)
 		if err != nil {
 			return false, err
@@ -552,7 +569,11 @@ func (s *InboundService) resetClientTrafficLocked(id int, clientEmail string) (b
 			return false, err
 		}
 		for _, client := range clients {
-			if client.Email == clientEmail && client.Enable {
+			if client.Email == clientEmail && (!client.Enable || !traffic.Enable) {
+				flipStoredEntry = true
+				if !inbound.Enable {
+					break
+				}
 				rt, push, _, perr := s.nodePushPlan(inbound)
 				if perr != nil {
 					return false, perr
@@ -570,9 +591,9 @@ func (s *InboundService) resetClientTrafficLocked(id int, clientEmail string) (b
 					if err != nil {
 						return false, err
 					}
-					cipher = oldSettings["method"].(string)
+					cipher, _ = oldSettings["method"].(string)
 				}
-				err1 := rt.AddUser(context.Background(), inbound, map[string]any{
+				clientMap := map[string]any{
 					"email":    client.Email,
 					"id":       client.ID,
 					"auth":     client.Auth,
@@ -580,14 +601,13 @@ func (s *InboundService) resetClientTrafficLocked(id int, clientEmail string) (b
 					"flow":     client.Flow,
 					"password": client.Password,
 					"cipher":   cipher,
-				})
-				if err1 == nil {
-					logger.Debug("Client enabled on", rt.Name(), "due to reset traffic:", clientEmail)
-				} else if inbound.NodeID != nil {
-					logger.Warning("Error in enabling client on", rt.Name(), ":", err1)
-				} else {
-					logger.Debug("Error in enabling client on", rt.Name(), ":", err1)
-					needRestart = true
+					"reverse":  client.Reverse,
+				}
+				applyRuntime = func() {
+					if err := rt.AddUser(context.Background(), inbound, clientMap); err != nil {
+						logger.Debug("Error in enabling client on", rt.Name(), ":", err)
+						needRestart = true
+					}
 				}
 				break
 			}
@@ -596,7 +616,7 @@ func (s *InboundService) resetClientTrafficLocked(id int, clientEmail string) (b
 
 	traffic.Up = 0
 	traffic.Down = 0
-	traffic.Enable = true
+	traffic.Enable = !handDisabled
 
 	db := database.GetDB()
 	now := time.Now().UnixMilli()
@@ -619,12 +639,24 @@ func (s *InboundService) resetClientTrafficLocked(id int, clientEmail string) (b
 			Update("last_traffic_reset_time", now).Error; err != nil {
 			return err
 		}
+		if flipStoredEntry {
+			if err := s.markClientEnabledInSettings(tx, id, clientEmail); err != nil {
+				return err
+			}
+			if err := tx.Model(&model.ClientRecord{}).Where("email = ?", clientEmail).
+				Updates(map[string]any{"enable": true, "updated_at": now}).Error; err != nil {
+				return err
+			}
+		}
 		if inbound != nil && inbound.NodeID != nil {
 			return (&NodeService{}).MarkNodeDirtyTx(tx, *inbound.NodeID)
 		}
 		return nil
 	}); err != nil {
 		return false, err
+	}
+	if applyRuntime != nil {
+		applyRuntime()
 	}
 
 	if inbound != nil && inbound.NodeID != nil {
@@ -641,11 +673,24 @@ func (s *InboundService) resetClientTrafficLocked(id int, clientEmail string) (b
 }
 
 func (s *InboundService) ResetAllTraffics() error {
+	var restore []int
 	err := submitTrafficWrite(func() error {
+		var err error
+		restore, err = quotaDisabledInboundIDs(database.GetDB(), time.Now().UnixMilli())
+		if err != nil {
+			return err
+		}
 		return s.resetAllTrafficsLocked()
 	})
 	if err == nil {
 		s.resetAllMtprotoQuotas()
+		for _, id := range restore {
+			if needRestart, enableErr := s.SetInboundEnable(id, true); enableErr != nil {
+				return enableErr
+			} else if needRestart {
+				(&XrayService{}).SetToNeedRestart()
+			}
+		}
 	}
 	return err
 }
@@ -664,12 +709,25 @@ func (s *InboundService) resetAllTrafficsLocked() error {
 }
 
 func (s *InboundService) ResetInboundTraffic(id int) error {
+	var restore bool
 	if err := submitTrafficWrite(func() error {
+		var err error
+		restore, err = quotaDisabledInbound(database.GetDB(), id, time.Now().UnixMilli())
+		if err != nil {
+			return err
+		}
 		return database.GetDB().Model(model.Inbound{}).
 			Where("id = ?", id).
 			Updates(map[string]any{"up": 0, "down": 0}).Error
 	}); err != nil {
 		return err
+	}
+	if restore {
+		if needRestart, err := s.SetInboundEnable(id, true); err != nil {
+			return err
+		} else if needRestart {
+			(&XrayService{}).SetToNeedRestart()
+		}
 	}
 
 	inbound, err := s.GetInbound(id)

@@ -97,7 +97,7 @@ func TestUpdate_PersistsRecordEnable_NoInbound(t *testing.T) {
 	}
 }
 
-func TestResetTrafficByEmail_LeavesRecordEnableTrue(t *testing.T) {
+func TestResetTrafficByEmail_KeepsNewDisabledClientOff(t *testing.T) {
 	setupBulkDB(t)
 	svc := &ClientService{}
 	inboundSvc := &InboundService{}
@@ -114,19 +114,19 @@ func TestResetTrafficByEmail_LeavesRecordEnableTrue(t *testing.T) {
 		t.Fatalf("ResetTrafficByEmail: %v", err)
 	}
 
-	if got := recordEnableOf(t, svc, email); !got {
-		t.Fatalf("%s: client_records.enable = false, want true", email)
+	if got := recordEnableOf(t, svc, email); got {
+		t.Fatalf("%s: reset unexpectedly enabled a newly disabled client", email)
 	}
 	tr := trafficOf(t, email)
-	if !tr.Enable {
-		t.Fatalf("%s: client_traffics.enable = false, want true", email)
+	if tr.Enable {
+		t.Fatalf("%s: reset unexpectedly enabled its traffic row", email)
 	}
 	if tr.Up != 0 || tr.Down != 0 {
 		t.Fatalf("%s: expected up/down 0, got up=%d down=%d", email, tr.Up, tr.Down)
 	}
 }
 
-func TestResetTrafficByEmail_NoInbound_LeavesRecordEnableTrue(t *testing.T) {
+func TestResetTrafficByEmail_NoInbound_PreservesManualDisable(t *testing.T) {
 	setupBulkDB(t)
 	svc := &ClientService{}
 	inboundSvc := &InboundService{}
@@ -147,7 +147,7 @@ func TestResetTrafficByEmail_NoInbound_LeavesRecordEnableTrue(t *testing.T) {
 		t.Fatalf("ResetTrafficByEmail: %v", err)
 	}
 
-	if got := recordEnableOf(t, svc, email); !got {
-		t.Fatalf("%s: client_records.enable = false, want true (no-inbound reset re-enable gap)", email)
+	if got := recordEnableOf(t, svc, email); got {
+		t.Fatalf("%s: traffic reset must preserve a manual disable without a spent quota", email)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"slices"
 
+	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
@@ -23,6 +24,11 @@ func (s *XraySettingService) SaveXraySetting(newXraySettings string) error {
 	// back here. Strip it before validation/storage, otherwise we save
 	// garbage the next read can't recover from without this same call.
 	newXraySettings = UnwrapXrayTemplateConfig(newXraySettings)
+	if rewritten, changed, err := database.RewriteXrayTemplateCompat(newXraySettings); err != nil {
+		return err
+	} else if changed {
+		newXraySettings = rewritten
+	}
 	if err := s.CheckXrayConfig(newXraySettings); err != nil {
 		return err
 	}
@@ -40,6 +46,17 @@ func (s *XraySettingService) CheckXrayConfig(XrayTemplateConfig string) error {
 	err := json.Unmarshal([]byte(XrayTemplateConfig), xrayConfig)
 	if err != nil {
 		return common.NewError("xray template config invalid:", err)
+	}
+	if err := xray.CheckConfigCertFiles([]byte(XrayTemplateConfig)); err != nil {
+		return err
+	}
+	if err := checkTemplateGeodata([]byte(xrayConfig.Geodata)); err != nil {
+		return err
+	}
+	for _, inbound := range xrayConfig.InboundConfigs {
+		if err := xray.CheckStreamBuildCost([]byte(inbound.StreamSettings)); err != nil {
+			return common.NewError("xray template inbound \""+inbound.Tag+"\":", err)
+		}
 	}
 	if len(xrayConfig.OutboundConfigs) > 0 {
 		var outbounds []json.RawMessage

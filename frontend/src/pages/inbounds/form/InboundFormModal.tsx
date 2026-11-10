@@ -196,10 +196,13 @@ export default function InboundFormModal({
   const getV = methods.getValues as unknown as (name?: string) => unknown;
   const control = methods.control;
   const [saving, setSaving] = useState(false);
+  const savedInboundId = useRef<number | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<RealityScanResult | null>(null);
   const {
     fallbacks,
+    hasStoredFallbacks,
+    fallbacksLoaded,
     fallbackChildOptions,
     loadFallbacks,
     saveFallbacks,
@@ -213,6 +216,7 @@ export default function InboundFormModal({
   const protocol = (useWatch({ control, name: 'protocol' }) ?? '') as string;
   const nodeShareOptionAvailable = false;
   const vlessEncryption = useWatch({ control, name: 'settings.encryption' }) ?? '';
+  const vlessDecryption = useWatch({ control, name: 'settings.decryption' }) ?? '';
   const ssMethod = useWatch({ control, name: 'settings.method' });
   const isSSWith2022 = isSS2022({
     protocol,
@@ -254,7 +258,8 @@ export default function InboundFormModal({
     streamSettings: { network },
     settings: { network: wSsNetwork, allowedNetwork: wTunnelNetwork, udp: mixedUdpOn },
   });
-  const isFallbackHost =
+  const hasVlessDecryption = protocol === Protocols.VLESS && vlessDecryption !== '' && vlessDecryption !== 'none';
+  const isFallbackHost = !hasVlessDecryption &&
     (protocol === Protocols.VLESS || protocol === Protocols.TROJAN)
     && network === 'tcp'
     && (security === 'tls' || security === 'reality');
@@ -350,6 +355,7 @@ export default function InboundFormModal({
       ? rawInboundToFormValues(dbInbound)
       : buildAddModeValues();
     methods.reset(initial);
+    savedInboundId.current = null;
     setScanResult(null);
     const initialTag = (initial.tag ?? '') as string;
     autoTagRef.current = isAutoInboundTag(initialTag, {
@@ -472,20 +478,38 @@ export default function InboundFormModal({
       );
       return;
     }
+    if (saving) return;
+    if (!fallbacksLoaded) {
+      messageApi.error(t('pages.inbounds.fallbacks.saveFailed'));
+      return;
+    }
+    if (!isFallbackHost && fallbacks.length > 0) {
+      messageApi.error(t(hasVlessDecryption ? 'pages.inbounds.fallbacks.decryptionConflict' : 'pages.inbounds.fallbacks.needsTls'));
+      return;
+    }
     setSaving(true);
     try {
+      if (!isFallbackHost && hasStoredFallbacks && dbInbound) {
+        if (!(await saveFallbacks(dbInbound.id))) {
+          messageApi.error(t('pages.inbounds.fallbacks.saveFailed'));
+          return;
+        }
+      }
       const payload = formValuesToWirePayload(parsed.data);
-      const url = mode === 'edit' && dbInbound
-        ? `/panel/api/inbounds/update/${dbInbound.id}`
+      const existingId = mode === 'edit' ? dbInbound?.id : savedInboundId.current;
+      const url = existingId
+        ? `/panel/api/inbounds/update/${existingId}`
         : '/panel/api/inbounds/add';
       const msg = await HttpUtil.post(url, payload);
       if (msg?.success) {
         if (isFallbackHost) {
           const obj = msg.obj as { id?: number; Id?: number } | null;
-          const masterId = mode === 'edit'
-            ? dbInbound!.id
-            : (obj?.id ?? obj?.Id ?? 0);
-          if (masterId) await saveFallbacks(masterId);
+          const masterId = existingId ?? obj?.id ?? obj?.Id ?? 0;
+          if (masterId) savedInboundId.current = masterId;
+          if (masterId && !(await saveFallbacks(masterId))) {
+            messageApi.error(t('pages.inbounds.fallbacks.saveFailed'));
+            return;
+          }
         }
         onSaved();
         onClose();
@@ -603,6 +627,7 @@ export default function InboundFormModal({
 
   const fallbacksCard = (
     <FallbacksCard
+      canAdd={isFallbackHost && fallbacksLoaded}
       fallbacks={fallbacks}
       fallbackChildOptions={fallbackChildOptions}
       addFallback={addFallback}
@@ -628,9 +653,10 @@ export default function InboundFormModal({
 
       {protocol === Protocols.SHADOWSOCKS && <ShadowsocksFields isSSWith2022={isSSWith2022} />}
 
-      {isFallbackHost && fallbacksCard}
+      {(isFallbackHost || fallbacks.length > 0) && fallbacksCard}
+      {hasVlessDecryption && <Alert type="warning" showIcon title={t('pages.inbounds.fallbacks.decryptionConflict')} />}
       {(protocol === Protocols.VLESS || protocol === Protocols.TROJAN)
-        && network === 'tcp' && !isFallbackHost && (
+        && network === 'tcp' && !hasVlessDecryption && !isFallbackHost && (
           <Alert
             className="mt-12"
             type="info"
@@ -929,7 +955,7 @@ export default function InboundFormModal({
                 Protocols.TUN,
                 Protocols.WIREGUARD,
                 Protocols.MTPROTO,
-              ] as string[]).includes(protocol) || isFallbackHost
+              ] as string[]).includes(protocol) || isFallbackHost || fallbacks.length > 0
                 ? [{ key: 'protocol', label: t('pages.inbounds.protocol'), children: protocolTab, forceRender: true }]
                 : []),
               ...(streamEnabled

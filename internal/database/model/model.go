@@ -844,12 +844,14 @@ type ClientRecord struct {
 	TotalGB      int64  `json:"totalGB" gorm:"column:total_gb"`
 	ExpiryTime   int64  `json:"expiryTime" gorm:"column:expiry_time"`
 	Enable       bool   `json:"enable" gorm:"default:true"`
-	TgID         int64  `json:"tgId" gorm:"column:tg_id"`
-	Group        string `json:"group" gorm:"column:group_name;default:'';index:idx_client_record_group"`
-	Comment      string `json:"comment"`
-	Reset        int    `json:"reset" gorm:"default:0"`
-	CreatedAt    int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
-	UpdatedAt    int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+	// ManualDisabled is operator intent, not a quota/expiry lifecycle result.
+	ManualDisabled bool   `json:"-" gorm:"column:manual_disabled;not null;default:false"`
+	TgID           int64  `json:"tgId" gorm:"column:tg_id"`
+	Group          string `json:"group" gorm:"column:group_name;default:'';index:idx_client_record_group"`
+	Comment        string `json:"comment"`
+	Reset          int    `json:"reset" gorm:"default:0"`
+	CreatedAt      int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
+	UpdatedAt      int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
 }
 
 func (ClientRecord) TableName() string { return "clients" }

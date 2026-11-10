@@ -11,8 +11,10 @@ import { ADDRESS_PORT_STRATEGY_OPTIONS } from '../outbound-form-constants';
 
 export default function SockoptForm({
   outboundTags = [],
+  showDomainStrategy = true,
 }: {
   outboundTags?: string[];
+  showDomainStrategy?: boolean;
 }) {
   const { t } = useTranslation();
   const { control, setValue } = useFormContext();
@@ -51,17 +53,19 @@ export default function SockoptForm({
               options={dialerProxyOptions}
             />
           </FormField>
-          <FormField
-            label={t('pages.xray.wireguard.domainStrategy')}
-            name={['streamSettings', 'sockopt', 'domainStrategy']}
-          >
-            <Select
-              options={Object.values(DOMAIN_STRATEGY_OPTION).map((v) => ({
-                value: v,
-                label: v,
-              }))}
-            />
-          </FormField>
+          {showDomainStrategy && (
+            <FormField
+              label={t('pages.xray.wireguard.domainStrategy')}
+              name={['streamSettings', 'sockopt', 'domainStrategy']}
+            >
+              <Select
+                options={Object.values(DOMAIN_STRATEGY_OPTION).map((v) => ({
+                  value: v,
+                  label: v,
+                }))}
+              />
+            </FormField>
+          )}
           <FormField
             label={t('pages.inbounds.form.addressPortStrategy')}
             name={['streamSettings', 'sockopt', 'addressPortStrategy']}

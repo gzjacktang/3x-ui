@@ -440,6 +440,7 @@ func (s *ClientService) BulkAdjust(inboundSvc *InboundService, emails []string, 
 		var rows []string
 		if err := db.Model(xray.ClientTraffic{}).
 			Where(cond+" AND enable = ? AND email IN ?", now, false, batch).
+			Where("email IN (?)", db.Model(&model.ClientRecord{}).Select("email").Where("manual_disabled = ?", false)).
 			Pluck("email", &rows).Error; err != nil {
 			return result, needRestart, err
 		}
@@ -516,7 +517,7 @@ func (s *ClientService) BulkAdjust(inboundSvc *InboundService, emails []string, 
 			}
 		}
 		if len(reEnable) > 0 {
-			_, nr, err := s.BulkSetEnable(inboundSvc, reEnable, true)
+			_, nr, err := s.bulkSetEnable(inboundSvc, reEnable, true, false)
 			if err != nil {
 				return result, needRestart, err
 			}
@@ -1386,6 +1387,11 @@ type BulkSetEnableReport struct {
 }
 
 func (s *ClientService) BulkSetEnable(inboundSvc *InboundService, emails []string, enable bool) (BulkSetEnableResult, bool, error) {
+	return s.bulkSetEnable(inboundSvc, emails, enable, true)
+}
+
+// Automatic quota restoration never clears a later operator stop.
+func (s *ClientService) bulkSetEnable(inboundSvc *InboundService, emails []string, enable, operator bool) (BulkSetEnableResult, bool, error) {
 	result := BulkSetEnableResult{}
 
 	seen := map[string]struct{}{}
@@ -1417,6 +1423,9 @@ func (s *ClientService) BulkSetEnable(inboundSvc *InboundService, emails []strin
 	}
 	recordsByEmail := make(map[string]*model.ClientRecord, len(records))
 	for i := range records {
+		if !operator && enable && records[i].ManualDisabled {
+			continue
+		}
 		recordsByEmail[records[i].Email] = &records[i]
 	}
 
@@ -1482,7 +1491,7 @@ func (s *ClientService) BulkSetEnable(inboundSvc *InboundService, emails []strin
 					return e
 				}
 				if e := tx.Model(&model.ClientRecord{}).Where("email IN ?", batch).
-					Updates(map[string]any{"enable": enable, "updated_at": now}).Error; e != nil {
+					Updates(map[string]any{"enable": enable, "manual_disabled": !enable, "updated_at": now}).Error; e != nil {
 					return e
 				}
 			}

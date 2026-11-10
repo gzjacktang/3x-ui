@@ -23,7 +23,8 @@ func forceRecordDisabled(t *testing.T, svc *ClientService, email string) {
 	t.Helper()
 	if err := database.GetDB().Model(&model.ClientRecord{}).
 		Where("email = ?", email).
-		UpdateColumn("enable", false).Error; err != nil {
+		// This fixture models a legacy lifecycle stop, not an operator switch.
+		Updates(map[string]any{"enable": false, "manual_disabled": false}).Error; err != nil {
 		t.Fatalf("force record disabled %q: %v", email, err)
 	}
 	if recordEnableOf(t, svc, email) {

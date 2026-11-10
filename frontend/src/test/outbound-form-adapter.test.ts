@@ -274,7 +274,6 @@ describe('outbound-form-adapter: round-trip', () => {
       settings: {},
     }));
     expect(empty.settings).toEqual({
-      domainStrategy: undefined,
       redirect: undefined,
       fragment: undefined,
       noises: undefined,
@@ -293,7 +292,6 @@ describe('outbound-form-adapter: round-trip', () => {
       },
     }));
     expect(filled.settings).toMatchObject({
-      domainStrategy: 'UseIPv4',
       redirect: '1.1.1.1',
       userLevel: 3,
       proxyProtocol: 2,
@@ -436,7 +434,8 @@ describe('outbound-form-adapter: targetStrategy', () => {
       settings: {},
       targetStrategy: 'useipv4v6',
     });
-    expect(form.targetStrategy).toBe('UseIPv4v6');
+    expect(form.targetStrategy).toBe('');
+    expect(formValuesToWirePayload(form).streamSettings).toMatchObject({ sockopt: { domainStrategy: 'UseIPv4v6' } });
   });
 
   it('omits targetStrategy when unset and drops unknown values', () => {
@@ -463,7 +462,8 @@ describe('outbound-form-adapter: targetStrategy', () => {
       expect(form.settings.domainStrategy).toBe('UseIPv6');
     }
     const back = formValuesToWirePayload(form);
-    expect(back.settings).toMatchObject({ domainStrategy: 'UseIPv6' });
+    expect(back.settings).not.toHaveProperty('domainStrategy');
+    expect(back.streamSettings).toMatchObject({ sockopt: { domainStrategy: 'UseIPv6' } });
     expect(back.settings).not.toHaveProperty('targetStrategy');
   });
 });

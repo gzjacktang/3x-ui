@@ -28,7 +28,7 @@ const SHARE_HOSTNAME_RE = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]
 // Format a host for interpolation into a URL authority. IPv6 literals are
 // wrapped in square brackets per RFC 3986; IPv4 and hostnames are left as-is.
 // Any brackets already present are first stripped so the helper is idempotent.
-function formatUrlHost(address: string): string {
+export function formatUrlHost(address: string): string {
   const bare = address.replace(/^\[|\]$/g, '');
   return bare.includes(':') ? `[${bare}]` : bare;
 }
@@ -843,29 +843,27 @@ export function genWireguardConfig(input: GenWireguardLinkInput): string {
   const peer = settings.peers[peerIndex];
   if (!peer) return '';
 
-  const pubKey = settings.secretKey.length > 0
-    ? Wireguard.generateKeypair(settings.secretKey).publicKey
-    : '';
+  const pubKey =
+    settings.secretKey.length > 0 ? Wireguard.generateKeypair(settings.secretKey).publicKey : '';
 
-  let txt = `[Interface]\n`;
-  txt += `PrivateKey = ${peer.privateKey ?? ''}\n`;
-  txt += `Address = ${peer.allowedIPs[0] ?? ''}\n`;
-  txt += `DNS = ${settings.dns || '1.1.1.1, 1.0.0.1'}\n`;
+  const lines = [
+    '[Interface]',
+    `PrivateKey = ${peer.privateKey ?? ''}`,
+    `Address = ${peer.allowedIPs.join(', ')}`,
+    `DNS = ${settings.dns || '1.1.1.1, 1.0.0.1'}`,
+  ];
   if (typeof settings.mtu === 'number' && settings.mtu > 0) {
-    txt += `MTU = ${settings.mtu}\n`;
+    lines.push(`MTU = ${settings.mtu}`);
   }
-  txt += `\n# ${remark}\n`;
-  txt += `[Peer]\n`;
-  txt += `PublicKey = ${pubKey}\n`;
-  txt += `AllowedIPs = 0.0.0.0/0, ::/0\n`;
-  txt += `Endpoint = ${address}:${port}`;
+  lines.push('', `# ${remark}`, '[Peer]', `PublicKey = ${pubKey}`, 'AllowedIPs = 0.0.0.0/0, ::/0');
+  lines.push(`Endpoint = ${formatUrlHost(address)}:${port}`);
   if (peer.preSharedKey && peer.preSharedKey.length > 0) {
-    txt += `\nPresharedKey = ${peer.preSharedKey}`;
+    lines.push(`PresharedKey = ${peer.preSharedKey}`);
   }
   if (typeof peer.keepAlive === 'number' && peer.keepAlive > 0) {
-    txt += `\nPersistentKeepalive = ${peer.keepAlive}\n`;
+    lines.push(`PersistentKeepalive = ${peer.keepAlive}`, '');
   }
-  return txt;
+  return joinConfLines(lines);
 }
 
 export function wireguardConfigFromLink(link: string, fallbackRemark = ''): string {
@@ -925,7 +923,7 @@ export function wireguardConfigFromLink(link: string, fallbackRemark = ''): stri
   if (psk) lines.push(`PresharedKey = ${psk}`);
   lines.push(`AllowedIPs = ${allowedIPs}`, `Endpoint = ${endpoint}`);
   if (keepAlive && Number(keepAlive) > 0) lines.push(`PersistentKeepalive = ${keepAlive}`);
-  return lines.join('\n');
+  return joinConfLines(lines);
 }
 
 export type { WireguardInboundPeer };
@@ -1302,3 +1300,4 @@ export function isPostQuantumLink(link: string): boolean {
   if (link.includes('ML-KEM-768')) return true;
   return false;
 }
+import { joinConfLines } from './conf-lines';
