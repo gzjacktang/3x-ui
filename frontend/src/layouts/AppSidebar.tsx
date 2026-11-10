@@ -18,6 +18,7 @@ import {
   MoonFilled,
   MoonOutlined,
   ReadOutlined,
+  FireOutlined,
   SafetyOutlined,
   SettingOutlined,
   SunOutlined,
@@ -156,6 +157,7 @@ export default function AppSidebar() {
     const children: NonNullable<MenuProps['items']> = [
       { key: '/settings#general', icon: <SettingOutlined />, label: t('pages.settings.panelSettings') },
       { key: '/settings#security', icon: <SafetyOutlined />, label: t('pages.settings.securitySettings') },
+      { key: '/settings#firewall', icon: <FireOutlined />, label: t('pages.settings.firewallSettings') },
     ];
     return children;
   }, [t]);

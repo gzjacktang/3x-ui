@@ -25,13 +25,14 @@ import { AllSettingSchema } from '@/schemas/setting';
 import AppSidebar from '@/layouts/AppSidebar';
 import GeneralTab from './GeneralTab';
 import SecurityTab from './SecurityTab';
+import FirewallTab from './FirewallTab';
 import './SettingsPage.css';
 
 interface ApiMsg {
   success?: boolean;
 }
 
-const tabSlugs = ['general', 'security'];
+const tabSlugs = ['general', 'security', 'firewall'];
 
 function isIp(h: string): boolean {
   if (typeof h !== 'string') return false;
@@ -176,6 +177,7 @@ export default function SettingsPage() {
   const categoryBody = useMemo(() => {
     switch (activeSlug) {
       case 'security': return <SecurityTab allSetting={allSetting} updateSetting={updateSetting} saveSetting={savePayload} />;
+      case 'firewall': return <FirewallTab />;
       default: return <GeneralTab allSetting={allSetting} updateSetting={updateSetting} />;
     }
   }, [activeSlug, allSetting, updateSetting, savePayload]);
