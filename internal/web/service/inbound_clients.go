@@ -171,27 +171,6 @@ func (s *InboundService) emailsUsedByOtherInbounds(emails []string, exceptInboun
 	return shared, nil
 }
 
-func (s *InboundService) writeBackClientSubID(sourceInboundID int, client model.Client, subID string) (bool, error) {
-	client.SubID = subID
-	client.UpdatedAt = time.Now().UnixMilli()
-	if client.Email == "" {
-		return false, common.NewError("empty client email")
-	}
-
-	settingsBytes, err := json.Marshal(map[string][]model.Client{
-		"clients": {client},
-	})
-	if err != nil {
-		return false, err
-	}
-
-	updatePayload := &model.Inbound{
-		Id:       sourceInboundID,
-		Settings: string(settingsBytes),
-	}
-	return s.clientService.UpdateInboundClient(s, updatePayload, client.Email)
-}
-
 func (s *InboundService) generateRandomCredential(targetProtocol model.Protocol) string {
 	switch targetProtocol {
 	case model.VMESS, model.VLESS:
