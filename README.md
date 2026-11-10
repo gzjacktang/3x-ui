@@ -20,7 +20,7 @@
 
 ## 快速开始
 
-当前仓库自动将主分支发布为最新构建；安装命令只从本仓库下载脚本和构建产物：
+当前仓库自动将主分支发布为最新 Linux amd64 构建，安装包附带 `.sha256` 校验文件；安装/更新在校验缺失或不匹配时中止。安装命令只从本仓库下载脚本和构建产物：
 
 当前构建包内置 Xray-core `v26.10.31`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本。
 
@@ -38,7 +38,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 2. 在页面顶部点击“内核版本”。
 3. 选择官方 Xray 版本并点击“安装所选版本”。
 
-版本切换会先停止 Xray，下载并校验所选版本，安装后自动重新启动 Xray；切换期间当前连接会暂时中断。版本列表按需加载，不会启动后台定时任务。
+版本切换会先下载并校验所选版本，用候选内核测试当前配置；检查通过后才替换程序并重新启动 Xray。下载或配置检查失败时，旧内核继续运行；实际重启时连接会短暂中断。版本列表按需加载，不会启动后台定时任务。
 
 ### 开发版更新
 
@@ -46,17 +46,32 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 
 ### 已安装面板的升级
 
-已安装面板可在“面板设置 → 常规 → 面板更新”中检查并安装本仓库的最新构建；确认更新后，页面会显示执行状态并在成功后自动刷新。也可以重复执行上方安装命令升级。升级时脚本会暂停 `x-ui` 服务并替换程序文件，升级完成后自动重新启动。默认配置下以下数据会保留：
+已安装面板可在“面板设置 → 常规 → 面板更新”中检查并安装本仓库的最新构建；确认更新后，页面会显示执行状态并在成功后自动刷新。也可以重复执行上方安装命令升级。升级会先下载并校验 SHA-256、解包和检查资源，随后暂停 `x-ui` 服务并替换程序文件；数据库迁移成功后才重新启动。更新不申请或改动证书，不重建已有的短访问路径。默认配置下以下数据会保留：
 
 - `/etc/x-ui/x-ui.db` 中的入站、客户端、出站、路由、用户和面板设置。
 - 外部 PostgreSQL 数据库中的所有数据。
 - 面板端口、访问路径、登录凭据和已配置的证书。
 
-脚本会删除并重新解压 `/usr/local/x-ui` 程序目录，因此请不要把自定义数据或手工修改的文件放在该目录中。升级前建议先备份 SQLite 数据库：
+已有安装通过暂存更新替换程序与内置资源，数据库、证书路径和自定义 `bin/` 文件会保留；同名的内置程序和数据库文件仍会随版本更新。升级前建议先备份 SQLite 数据库：
 
 ```bash
 cp -a /etc/x-ui/x-ui.db "/etc/x-ui/x-ui.db.bak.$(date +%Y%m%d%H%M%S)"
 ```
+
+升级包含一次旧会话密钥轮换，已有账号和密码不变，但需要重新登录。Freedom、DNS、WireGuard/WARP、XDNS 旧配置会按当前内核语义迁移。数据库迁移失败时更新会中止并保持服务停止，不会自动回滚数据库；请保留升级前备份。
+
+### 本轮选择性升级
+
+- Go 工具链、安全依赖和面板使用的 Xray 配置库与内置 `26.10.31` 对齐。
+- 登录并发限流、登录会话轮换、反代 IP 和 WebSocket 来源校验；增加 Web 连接上限和共享静态压缩缓存。
+- SQLite 文件权限收紧；直接启动空库时也生成随机初始凭据，已有登录账号不重置。
+- ENC 与回落冲突在保存及配置生成前拒绝；补充出站密钥、证书文件和高开销配置校验。
+- 修复客户端续期、流量重置、手动停用保护、部分字段更新和 IP 临时限制恢复；完整保留核心崩溃原因。
+- 发布仅保留 Linux amd64，安装与升级严格核对 `.sha256`，所有面板更新入口继续使用本仓库。
+
+未恢复系统监控、节点、主机、分组、订阅、通知服务或额外语言。普通 `geoip.dat` / `geosite.dat` 继续随构建更新，不下载 IR/RU 数据库。
+
+详细范围、验证记录和升级注意事项见 [升级记录](UPGRADE_PROGRESS.md)。
 
 ### 无人值守安装
 
@@ -67,26 +82,6 @@ XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktan
 ```
 
 更多部署示例见 [`deploy/`](deploy/)，包括 [Cloud-init 配置](deploy/cloud-init/) 和 [Hetzner 部署说明](deploy/marketplace/hetzner/)。
-
-## Docker
-
-默认使用 SQLite，直接在仓库目录执行：
-
-```bash
-docker compose up -d
-```
-
-使用捆绑的 PostgreSQL 服务：
-
-```bash
-docker compose --profile postgres up -d
-```
-
-也可以直接构建本仓库的镜像：
-
-```bash
-docker build -t ghcr.io/gzjacktang/3x-ui:local .
-```
 
 ## 数据库
 
@@ -99,9 +94,9 @@ XUI_DB_DSN=postgres://xui:password@127.0.0.1:5432/xui?sslmode=disable
 
 ## 支持的平台
 
-支持 Ubuntu、Debian、Armbian、Fedora、CentOS、RHEL、AlmaLinux、Rocky Linux、Oracle Linux、Amazon Linux、Arch、Manjaro、openSUSE、Alpine 和 Windows。
+仅提供 Linux `amd64`（x86_64）原生安装包，适用于 Ubuntu、Debian、Fedora、CentOS、RHEL、AlmaLinux、Rocky Linux、Oracle Linux、Amazon Linux、Arch、Manjaro、openSUSE 和 Alpine。
 
-支持 `amd64`、`386`、`arm64`、`armv7`、`armv6`、`armv5` 和 `s390x`。
+不再构建或提供 Docker、Windows、386、ARM 和 s390x 安装包。安装器会在不支持的平台上提前退出。
 
 ## 文档与开发
 
@@ -115,8 +110,8 @@ XUI_DB_DSN=postgres://xui:password@127.0.0.1:5432/xui?sslmode=disable
 
 ```bash
 cd frontend
-pnpm install
-pnpm run build
+npm ci
+npm run build
 ```
 
 后端测试：

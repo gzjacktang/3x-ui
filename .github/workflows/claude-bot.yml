@@ -105,7 +105,7 @@ jobs:
               - internal/web/global/   cross-package access to web/sub servers
               - internal/web/session/  cookie sessions + CSRF protection
               - internal/web/locale/   i18n engine (go-i18n);
-                internal/web/translation/  the 13 embedded locale JSON files
+                internal/web/translation/  English and Simplified Chinese locales
               - internal/web/network/, internal/web/runtime/,
                 internal/web/websocket/   net helpers, wiring, live push
               - internal/web/dist/     embedded Vite build of the React frontend
@@ -114,18 +114,17 @@ jobs:
                                        src/components, src/api, src/i18n, ...)
             - tools/openapigen/        Go generator for the OpenAPI spec and
                                        frontend API types
-            - docs/                    extra docs (custom subscription templates)
+            - docs/                    extra development docs
             - install.sh, update.sh, x-ui.sh, x-ui.service.*  install/upgrade
               + systemd units
-            - Dockerfile, docker-compose.yml, DockerEntrypoint.sh, DockerInit.sh
-            - windows_files/, x-ui.rc  Windows support files. (A top-level
+            - x-ui.rc                  Alpine startup script. (A top-level
               x-ui/ folder, if present, is gitignored local runtime data, not
               source.)
 
             Verified runtime facts (still confirm in code/README/wiki before quoting):
-            - Linux install: bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-            - Windows is also a supported platform (see README "Supported
-              Platforms" and windows_files/).
+            - Linux amd64 install: bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
+            - Only native Linux amd64 is supported. Docker, Windows and other
+              CPU architectures are not built or published by this fork.
             - Management menu: run `x-ui` on the server.
             - Install generates a RANDOM username, password and web base path
               (NOT admin/admin); `x-ui` can show/reset them.
@@ -140,11 +139,6 @@ jobs:
             - SQLite -> PostgreSQL: `x-ui migrate-db --dsn "postgres://..."`, then
               set XUI_DB_TYPE/XUI_DB_DSN in /etc/default/x-ui and
               `systemctl restart x-ui`. The source SQLite file is left in place.
-            - Docker image: ghcr.io/mhsanaei/3x-ui. PostgreSQL profile:
-              `docker compose --profile postgres up -d`. Fail2ban IP-limit
-              enforcement needs NET_ADMIN + NET_RAW (compose grants them via
-              cap_add; a bare `docker run` must add
-              `--cap-add=NET_ADMIN --cap-add=NET_RAW`).
             - Protocols (inbound Protocol enum in internal/database/model/model.go):
               VLESS, VMess, Trojan, Shadowsocks, WireGuard, Hysteria2 (stored
               as protocol "hysteria" with stream version 2), HTTP, SOCKS

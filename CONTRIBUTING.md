@@ -4,53 +4,17 @@ Thanks for taking the time to contribute to 3x-ui. This guide gets a development
 
 ## Prerequisites
 
-- **Go 1.26+** (the version pinned in `go.mod`)
+- **Go 1.27.3+** (the version pinned in `go.mod`)
 - **Node.js 24 LTS** (the version pinned in `.nvmrc`) and npm 10+ (for the React frontend)
 - **Git**
-- **A C compiler** — required by the CGo SQLite driver (`github.com/mattn/go-sqlite3`). Linux and macOS already ship one; for Windows see below.
+- **A C compiler** — required by the CGo SQLite driver (`github.com/mattn/go-sqlite3`). Release packages target Linux amd64 only; macOS may be used for local development and tests.
 
-### Windows: MinGW-w64
-
-`go build` on Windows fails with `cgo: C compiler "gcc" not found` until a GCC toolchain is installed. Two options — pick whichever fits.
-
-**Option A — standalone zip (fastest, no package manager)**
-
-1. Download the latest build from <https://github.com/niXman/mingw-builds-binaries/releases>. For most setups, pick a release named:
-   ```
-   x86_64-<version>-release-posix-seh-ucrt-rt_<n>-rev<m>.7z
-   ```
-   (64-bit, POSIX threads, SEH exceptions, UCRT runtime — matches modern Windows defaults.)
-2. Extract it somewhere stable, e.g. `C:\mingw64\`.
-3. Add `C:\mingw64\bin` to the **Windows** `PATH` (System Properties → Environment Variables → Path → New).
-4. Open a fresh terminal and confirm:
-   ```powershell
-   gcc --version
-   ```
-
-**Option B — MSYS2 (when a Unix shell is also useful)**
-
-1. Install MSYS2 from <https://www.msys2.org/>.
-2. Open the **MSYS2 UCRT64** shell from the Start menu and update once:
-   ```bash
-   pacman -Syu
-   ```
-3. Install the UCRT64 toolchain:
-   ```bash
-   pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkg-config
-   ```
-4. Add `C:\msys64\ucrt64\bin` to the Windows `PATH`.
-5. Verify with `gcc --version` in a fresh terminal.
-
-After either path, `go build ./...` and `go run .` work normally.
-
-> **Why MinGW-w64 over MSVC:** `mattn/go-sqlite3` officially supports GCC, builds are faster on Windows, and the toolchain does not require a Visual Studio install. If Visual Studio Build Tools are already present that works too — just make sure `CC=cl` is **not** set in the environment.
-
-Cross-building the Linux SQLite target from Windows (or vice versa) requires a separate cross-compiler and is out of scope here; build natively on the target OS.
+Only Linux amd64 is distributed. Docker, Windows, 386, ARM and s390x release targets are not supported by this fork.
 
 ## First-time setup
 
 ```bash
-git clone https://github.com/MHSanaei/3x-ui.git
+git clone https://github.com/gzjacktang/3x-ui.git
 cd 3x-ui
 
 cp .env.example .env
@@ -76,7 +40,7 @@ XUI_INIT_WEB_BASE_PATH=/
 # XUI_PORT=8080
 ```
 
-Drop the xray binary (`xray-windows-amd64.exe` on Windows, `xray-linux-amd64` on Linux, etc.) plus the matching `geoip.dat` and `geosite.dat` files into `x-ui/`. The easiest source is a [released Xray-core build](https://github.com/XTLS/Xray-core/releases). On Windows, `wintun.dll` is also required for testing TUN inbounds.
+Drop the matching Xray binary (`xray-linux-amd64` on the supported target) plus `geoip.dat` and `geosite.dat` into `x-ui/`. Obtain the pinned version from [Xray-core releases](https://github.com/XTLS/Xray-core/releases); do not add IR/RU databases.
 
 ## Running
 
@@ -84,7 +48,7 @@ Drop the xray binary (`xray-windows-amd64.exe` on Windows, `xray-linux-amd64` on
 go run .
 ```
 
-Open [http://localhost:2053](http://localhost:2053) and log in with `admin` / `admin`. Credentials must be changed on first login.
+Open [http://localhost:2053](http://localhost:2053). A new database gets random initial credentials printed once in the startup log; existing credentials are preserved.
 
 ### Inside VS Code
 
@@ -231,7 +195,6 @@ For deeper notes on the frontend toolchain see [`frontend/README.md`](frontend/R
 | `frontend/` | React + Ant Design 6 + TypeScript source for the panel UI |
 | `internal/database/` | GORM models, migrations, seeders (SQLite / PostgreSQL) |
 | `internal/xray/` | Xray-core process lifecycle and gRPC API client |
-| `internal/sub/` | Subscription endpoints (raw, JSON, Clash) |
 | `internal/config/` | Environment-variable helpers, paths, defaults |
 | `x-ui/` | **Runtime data** — db, logs, xray binary, geo files (gitignored) |
 
@@ -243,7 +206,7 @@ Tests live next to the code (`foo.go` ↔ `foo_test.go`); frontend specs and gol
 
 - **Stdlib `testing` only** — no testify. Table-driven with `t.Run` subtests and `t.Helper()` on helpers.
 - **Assert the contract, not internals.** Pin the exact value / typed error / emitted string — not `err != nil` or `len > 0`. A test that still passes when the behavior is broken is worse than no test.
-- **Real dependencies over mocks.** Get a throwaway DB with `database.InitDB(filepath.Join(t.TempDir(), "x-ui.db"))` + `t.Cleanup(func() { _ = database.CloseDB() })` (Windows-safe), and use `httptest` servers for HTTP. The `internal/sub` suite's `initSubDB(t)` is the template.
+- **Real dependencies over mocks.** Get a throwaway DB with `database.InitDB(filepath.Join(t.TempDir(), "x-ui.db"))` + `t.Cleanup(func() { _ = database.CloseDB() })`, and use `httptest` servers for HTTP.
 
 ### Running
 
@@ -266,7 +229,6 @@ Input-heavy or pure logic (link builders, parsers, decoders) is also covered by 
 
 ```bash
 go install github.com/go-gremlins/gremlins/cmd/gremlins@latest
-gremlins unleash ./internal/sub/
 gremlins unleash -E 'server\.go|xray\.go|inbound\.go|client_bulk\.go|inbound_traffic\.go|.*_postgres_test\.go' ./internal/web/service/
 ```
 
@@ -306,11 +268,10 @@ CI runs this for you nightly (and on demand) via `.github/workflows/mutation.yml
 A valid `XUI_PORT` takes precedence over the database-backed `webPort` for the
 current process without changing the stored setting. Unset, empty, whitespace-only,
 malformed, or out-of-range values fall back to `webPort`; invalid configured values
-also produce a warning. With Docker bridge networking, the published container port
-must match the override, for example `XUI_PORT: "8080"` with `ports: ["8080:8080"]`.
+also produce a warning. Only native Linux amd64 installations are distributed.
 
 ## Issues
 
-- Bug reports and feature requests: [GitHub Issues](https://github.com/MHSanaei/3x-ui/issues)
+- Bug reports and feature requests: [GitHub Issues](https://github.com/gzjacktang/3x-ui/issues)
 
 Before filing a bug, include the OS, Go version, panel version (`/panel/api/server/status` or the dashboard footer), and the relevant excerpt from `x-ui/3xui.log`.

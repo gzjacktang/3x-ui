@@ -14,6 +14,8 @@ xui_repo="${XUI_REPO:=gzjacktang/3x-ui}"
 xui_github="https://github.com/${xui_repo}"
 xui_raw="https://raw.githubusercontent.com/${xui_repo}"
 
+[[ "$(uname -s)" == "Linux" ]] || { echo "Only Linux amd64 is supported." >&2; exit 1; }
+
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain} Please run this script with root privilege \n " && exit 1
 
@@ -32,16 +34,13 @@ echo "The OS release is: $release"
 
 arch() {
     case "$(uname -m)" in
-        x86_64 | x64 | amd64) echo 'amd64' ;;
-        i*86 | x86) echo '386' ;;
-        armv8* | armv8 | arm64 | aarch64) echo 'arm64' ;;
-        armv7* | armv7 | arm) echo 'armv7' ;;
-        armv6* | armv6) echo 'armv6' ;;
-        armv5* | armv5) echo 'armv5' ;;
-        s390x) echo 's390x' ;;
-        *) echo -e "${green}Unsupported CPU architecture! ${plain}" && rm -f install.sh && exit 1 ;;
+        x86_64 | x64 | amd64) echo amd64 ;;
+        *) echo "Only Linux amd64 is supported." >&2; return 1 ;;
     esac
 }
+
+
+arch > /dev/null || exit 1
 
 echo "Arch: $(arch)"
 
@@ -160,7 +159,7 @@ write_install_result() {
     local u="$1" p="$2" port="$3" wbp="$4" scheme="$5" host="$6" token="$7" dbtype="$8"
     local result_file="/etc/x-ui/install-result.env"
     local url_host="${host:-SERVER_IP_UNKNOWN}"
-    install -d -m 755 /etc/x-ui 2> /dev/null
+    install -d -m 700 /etc/x-ui 2> /dev/null
     local prev_umask
     prev_umask=$(umask)
     umask 077
@@ -1023,9 +1022,23 @@ prompt_and_setup_ssl() {
 }
 
 config_after_install() {
-    local existing_hasDefaultCredential=$(${xui_folder}/x-ui setting -show true | grep -Eo 'hasDefaultCredential: .+' | awk '{print $2}')
-    local existing_webBasePath=$(${xui_folder}/x-ui setting -show true | grep -Eo 'webBasePath: .+' | awk '{print $2}' | sed 's#^/##')
-    local existing_port=$(${xui_folder}/x-ui setting -show true | grep -Eo 'port: .+' | awk '{print $2}')
+    local settings existing_webBasePath
+    if ! settings=$("${xui_folder}/x-ui" setting -show true) ||
+        ! existing_webBasePath=$(printf '%s\n' "$settings" | awk '
+            /^get .* failed, error info:/ { failed = 1 }
+            /^hasDefaultCredential: (true|false)$/ { credentials++ }
+            /^port: [0-9]+$/ { ports++ }
+            /^webBasePath:/ { paths++; sub(/^webBasePath: ?/, ""); path = $0 }
+            END {
+                if (failed || credentials != 1 || ports != 1 || paths != 1 || (path != "" && path !~ /^\//)) exit 1
+                print path
+            }'); then
+        echo "Unable to read panel settings; existing settings were left unchanged." >&2
+        return 1
+    fi
+    existing_webBasePath=${existing_webBasePath#/}
+    local existing_hasDefaultCredential=$(printf '%s\n' "$settings" | awk '/^hasDefaultCredential: / {print $2}')
+    local existing_port=$(printf '%s\n' "$settings" | awk '/^port: / {print $2}')
     # Properly detect empty cert by checking if cert: line exists and has content after it
     local existing_cert=$(${xui_folder}/x-ui setting -getCert true | grep 'cert:' | awk -F': ' '{print $2}' | tr -d '[:space:]')
     local URL_lists=(
@@ -1065,7 +1078,7 @@ config_after_install() {
         fi
     fi
 
-    if [[ ${#existing_webBasePath} -lt 4 ]]; then
+    if [[ -z "$existing_webBasePath" ]]; then
         if [[ "$existing_hasDefaultCredential" == "true" ]]; then
             local config_webBasePath="${XUI_WEB_BASE_PATH:-$(gen_random_string 18)}"
             local config_username="${XUI_USERNAME:-$(gen_random_string 10)}"
@@ -1360,7 +1373,7 @@ EOF
 # by invoking the freshly installed x-ui CLI. IP Limit is load-bearing on
 # fail2ban (without it the panel disables the limitIp field and zeroes existing
 # limits), so a fresh install should make it work out of the box, just like the
-# Docker image already does. Non-fatal by design: a fail2ban failure must never
+# fresh installations need. Non-fatal by design: a fail2ban failure must never
 # abort the panel install.
 setup_fail2ban() {
     if [[ -n "${XUI_ENABLE_FAIL2BAN+x}" && "${XUI_ENABLE_FAIL2BAN}" != "true" ]]; then
@@ -1416,7 +1429,45 @@ _install_xui_service_unit() {
     return 0
 }
 
+download_release() {
+    curl --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 600 "$@"
+}
+
+verify_release_archive() {
+    local archive="$1" url="$2" expected actual
+    if ! download_release -fLsS -o "${archive}.sha256" "${url}.sha256"; then
+        rm -f -- "${archive}.sha256"
+        echo "Cannot download the required SHA-256 checksum." >&2
+        return 1
+    fi
+    expected=$(awk 'NR == 1 {print $1}' "${archive}.sha256" | tr 'A-F' 'a-f')
+    actual=$(sha256sum "$archive" | awk '{print $1}')
+    rm -f -- "${archive}.sha256"
+    if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || "$expected" != "$actual" ]]; then
+        echo "Checksum mismatch for $(basename "$archive")." >&2
+        return 1
+    fi
+    echo "SHA-256 verified: $actual"
+}
+
+
 install_x-ui() {
+
+    # Existing installations use the same non-interactive, staged updater as the
+    # web panel. Do not re-enter first-install certificate or credential setup.
+    if [[ -x "${xui_folder}/x-ui" ]]; then
+        local updater update_status
+        updater=$(mktemp /tmp/3x-ui-update.XXXXXX) || exit 1
+        if ! curl -fLsS --retry 5 --retry-delay 3 -o "$updater" "${xui_raw}/main/update.sh"; then
+            rm -f "$updater"
+            echo "Cannot download the updater; existing installation was left untouched." >&2
+            exit 1
+        fi
+        XUI_UPDATE_TAG="${1:-dev-latest}" bash "$updater"
+        update_status=$?
+        rm -f "$updater"
+        return "$update_status"
+    fi
     cd ${xui_folder%/x-ui}/
 
     # Download resources
@@ -1467,17 +1518,16 @@ install_x-ui() {
             exit 1
         fi
     fi
-    local xui_script_temp="/usr/bin/x-ui-temp.$$"
-    rm -f "${xui_script_temp}"
-    curl -fLRo "${xui_script_temp}" "${xui_raw}/main/x-ui.sh"
-    if [[ $? -ne 0 ]]; then
-        rm -f "${xui_script_temp}"
-        echo -e "${red}Failed to download x-ui.sh${plain}"
+    local archive="${xui_folder}-linux-$(arch).tar.gz"
+    local release_url="${xui_github}/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
+    verify_release_archive "$archive" "$release_url" || {
+        echo "Panel archive verification failed." >&2
         exit 1
-    fi
-    if [[ ! -s "${xui_script_temp}" ]]; then
-        rm -f "${xui_script_temp}"
-        echo -e "${red}Downloaded x-ui.sh is empty${plain}"
+    }
+    local xui_script_temp="/usr/bin/x-ui-temp.$$"
+    if ! tar -xOf "$archive" x-ui/x-ui.sh > "$xui_script_temp" || [[ ! -s "$xui_script_temp" ]]; then
+        rm -f "$xui_script_temp"
+        echo "The archive does not contain its management script." >&2
         exit 1
     fi
 
@@ -1515,23 +1565,8 @@ install_x-ui() {
     chmod +x x-ui
     chmod +x x-ui.sh
 
-    # Check the system's architecture and rename the file accordingly.
-    # The panel binary maps GOARCH=arm to "arm32" (internal/xray/process.go),
-    # so the Xray binary must be named xray-linux-arm32; mtg keeps plain "arm".
-    if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then
-        mv bin/xray-linux-$(arch) bin/xray-linux-arm32
-        chmod +x bin/xray-linux-arm32
-        if [[ -f bin/mtg-linux-$(arch) ]]; then
-            mv bin/mtg-linux-$(arch) bin/mtg-linux-arm
-            chmod +x bin/mtg-linux-arm
-        fi
-    fi
-    chmod +x x-ui bin/xray-linux-$(arch)
-    if [[ -f bin/mtg-linux-arm ]]; then
-        chmod +x bin/mtg-linux-arm
-    elif [[ -f bin/mtg-linux-$(arch) ]]; then
-        chmod +x bin/mtg-linux-$(arch)
-    fi
+    chmod +x x-ui bin/xray-linux-amd64
+    if [[ -f bin/mtg-linux-amd64 ]]; then chmod +x bin/mtg-linux-amd64; fi
 
     # Update x-ui cli and se set permission
     mv -f "${xui_script_temp}" /usr/bin/x-ui
@@ -1561,7 +1596,7 @@ install_x-ui() {
     if [[ $release == "alpine" ]]; then
         xui_rc_temp="/etc/init.d/x-ui.tmp.$$"
         rm -f "${xui_rc_temp}"
-        curl -fLRo "${xui_rc_temp}" "${xui_raw}/main/x-ui.rc"
+        cp x-ui.rc "${xui_rc_temp}"
         if [[ $? -ne 0 ]]; then
             rm -f "${xui_rc_temp}"
             echo -e "${red}Failed to download x-ui.rc${plain}"
