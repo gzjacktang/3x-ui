@@ -57,8 +57,20 @@
 - `npm audit --audit-level=low`：0 告警；`govulncheck ./...`：无漏洞。
 - 安装/更新隔离测试覆盖校验缺失/错误、平台拒绝、短路径/证书保留、资源下载失败及迁移/启动顺序；脚本语法和 diff 空白检查通过。
 - 生成的前端契约已重建核对，内部人工停用字段未暴露到 API，生成文件无差异。
-- 修复 MTProto 竞态后，全量 `go test -race -shuffle=on -count=1 -p 1 ./...` 已通过；发布产物仍需在 Actions 构建完成后抽查。
-- PostgreSQL 专用测试在本机按环境门控跳过，Linux CI 会使用独立临时 PostgreSQL 服务执行；未接触用户数据库。
+- 修复 MTProto 竞态后，全量 `go test -race -shuffle=on -count=1 -p 1 ./...` 已通过。
+- 最终 [Linux CI](https://github.com/gzjacktang/3x-ui/actions/runs/42768182038) 8 项全部通过：Go、race/shuffle、PostgreSQL、前端、生成契约、安全扫描、模糊测试、静态检查。
+- PostgreSQL 专用测试在本机按环境门控跳过，已由 GitHub CI 的独立临时 PostgreSQL 服务验证；未接触用户数据库。
+
+## 发布产物核对
+
+[发布构建](https://github.com/gzjacktang/3x-ui/actions/runs/42768181682) 成功，[滚动 Release](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest) 对应程序提交 `7713275606f3c8523fa2605fd6f6f5f5bcc1d5fc`。后续仅文档提交不改变该程序包。
+
+- Release 资产只有 `x-ui-linux-amd64.tar.gz` 与对应 `.sha256`；旧 Windows/386/ARM/s390x 滚动发布包已清理。
+- 下载后 SHA-256 校验通过：`2107df1025eacf8f20e6966e6e38c99408efbaef8f49a74301b4458329590697`。
+- 解包核对面板、Xray、MTProto 均为静态链接 Linux x86-64 程序；面板元数据为 Go 1.27.3、提交 `77132756`，并包含 `DefaultGODEBUG=multipathtcp=0`。
+- 包内 `x-ui.sh` 与本仓库同提交源码逐字一致；geodata 只有普通 `geoip.dat` 与 `geosite.dat`，没有 IR/RU 数据库。
+
+独立的 GitHub Pages 文档站部署因仓库未启用 Pages 返回 404；文档静态构建本身成功。未擅自开启 Pages 或绑定原作者域名；这不影响 GitHub README、面板 CI 或安装包发布。
 
 ## 复核结果
 
