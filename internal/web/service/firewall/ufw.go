@@ -37,10 +37,11 @@ type Runner func(ctx context.Context, name string, args ...string) (string, erro
 
 // Service manages host UFW rules for the panel.
 type Service struct {
-	Run          Runner
-	SSHConfig    string
-	LookPath     func(file string) (string, error)
-	PanelPortFn  func() (int, error)
+	Run            Runner
+	SSHConfig      string
+	LookPath       func(file string) (string, error)
+	PanelPortFn    func() (int, error)
+	BackupDir      string
 	CommandTimeout time.Duration
 }
 
@@ -60,12 +61,14 @@ type ProtectedPort struct {
 }
 
 type Status struct {
-	Installed       bool            `json:"installed"`
-	Active          bool            `json:"active"`
-	Available       bool            `json:"available"`
-	Rules           []Rule          `json:"rules"`
-	ProtectedPorts  []ProtectedPort `json:"protectedPorts"`
-	Message         string          `json:"message,omitempty"`
+	Installed            bool              `json:"installed"`
+	Active               bool              `json:"active"`
+	Available            bool              `json:"available"`
+	Rules                []Rule            `json:"rules"`
+	ProtectedPorts       []ProtectedPort   `json:"protectedPorts"`
+	Foreign              []ForeignFirewall `json:"foreign"`
+	TakeoverRecommended  bool              `json:"takeoverRecommended"`
+	Message              string            `json:"message,omitempty"`
 }
 
 type PortSpec struct {
@@ -129,10 +132,13 @@ func (s *Service) Status() (Status, error) {
 	st := Status{
 		Rules:          []Rule{},
 		ProtectedPorts: protected,
+		Foreign:        []ForeignFirewall{},
 	}
 
 	if _, err := s.lookPath()("ufw"); err != nil {
 		st.Message = ErrUFWNotFound.Error()
+		st.Foreign = s.detectForeign(false)
+		st.TakeoverRecommended = takeoverRecommended(false, st.Foreign)
 		return st, nil
 	}
 	st.Installed = true
@@ -144,11 +150,15 @@ func (s *Service) Status() (Status, error) {
 		if st.Message == "" {
 			st.Message = err.Error()
 		}
+		st.Foreign = s.detectForeign(false)
+		st.TakeoverRecommended = takeoverRecommended(false, st.Foreign)
 		return st, nil
 	}
 
 	st.Active = strings.Contains(out, "Status: active")
 	st.Rules = parseNumberedRules(out, protected)
+	st.Foreign = s.detectForeign(st.Active)
+	st.TakeoverRecommended = takeoverRecommended(st.Active, st.Foreign)
 	return st, nil
 }
 

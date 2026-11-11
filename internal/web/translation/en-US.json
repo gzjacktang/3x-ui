@@ -978,7 +978,18 @@
         "inboundHintsEmpty": "All inbound ports appear allowed (or UFW is inactive).",
         "allowInbound": "Allow",
         "yes": "Yes",
-        "no": "No"
+        "no": "No",
+        "takeoverTitle": "Non-UFW host firewall detected",
+        "takeoverDesc": "Another host firewall (nftables / iptables / firewalld) appears active while UFW is not managing traffic. You can back up those rules, disable them, then let UFW take over with SSH and the panel port protected.",
+        "takeoverButton": "Disable old firewall and switch to UFW",
+        "takeoverConfirmTitle": "Switch to UFW?",
+        "takeoverConfirmDesc": "This will briefly open inbound ports while the old firewall is cleared, then enable UFW with SSH and the panel port allowed. Existing rules are saved under /etc/x-ui/firewall-backups/. Continue only if you accept that short exposure window.",
+        "takeoverConfirmOk": "I understand, switch to UFW",
+        "takeoverSuccess": "Switched to UFW",
+        "takeoverFailed": "Firewall takeover failed",
+        "foreignTitle": "Detected host firewalls",
+        "foreignActive": "Active / restrictive",
+        "foreignInactive": "Present"
       }
     },
     "xray": {

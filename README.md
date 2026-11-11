@@ -46,9 +46,10 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 1. 登录面板后进入“面板设置 → 防火墙”。
 2. 可查看当前 UFW 状态与规则，按端口/协议放行，或按规则编号删除。
 3. 启用防火墙前会自动放行 SSH 与当前面板监听端口；这两类保护规则不能从面板删除。
-4. 仅支持 Debian/Ubuntu 系主机上的 UFW；未安装时可在页面内安装。不做 firewalld / nftables 直管，也不会在创建入站时自动开端口。
+4. 仅支持 Debian/Ubuntu 系主机上的 UFW；未安装时可在页面内安装。不做 firewalld / nftables 日常直管，也不会在创建入站时自动开端口。
+5. 若检测到系统已有生效的 nftables / iptables / firewalld（且 UFW 未接管），页面会提示一键备份旧规则、停用旧防火墙并切换到 UFW（先放行 SSH 与面板端口）。切换瞬间入站可能短暂开放。
 
-关闭防火墙、删除规则属于高风险操作，请确认不会中断 SSH 与面板访问后再执行。
+关闭防火墙、删除规则、一键接管均属高风险操作，请确认不会中断 SSH 与面板访问后再执行。
 
 ### 开发版更新
 

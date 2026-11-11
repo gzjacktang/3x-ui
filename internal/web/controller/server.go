@@ -55,6 +55,7 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.POST("/firewall/disable", a.disableFirewall)
 	g.POST("/firewall/allow", a.allowFirewallPort)
 	g.POST("/firewall/delete", a.deleteFirewallRule)
+	g.POST("/firewall/takeover", a.takeoverFirewall)
 
 	g.POST("/stopXrayService", a.stopXrayService)
 	g.POST("/restartXrayService", a.restartXrayService)

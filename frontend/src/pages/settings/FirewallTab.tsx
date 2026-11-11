@@ -43,12 +43,20 @@ interface ProtectedPort {
   label: string;
 }
 
+interface ForeignFirewall {
+  name: string;
+  active: boolean;
+  detail?: string;
+}
+
 interface FirewallStatus {
   installed: boolean;
   active: boolean;
   available: boolean;
   rules: FirewallRule[];
   protectedPorts: ProtectedPort[];
+  foreign?: ForeignFirewall[];
+  takeoverRecommended?: boolean;
   message?: string;
 }
 
@@ -152,6 +160,19 @@ export default function FirewallTab() {
     void runAction(() => HttpUtil.post('/panel/api/server/firewall/install'));
   }
 
+  function onTakeover() {
+    modal.confirm({
+      title: t('pages.settings.firewall.takeoverConfirmTitle'),
+      content: t('pages.settings.firewall.takeoverConfirmDesc'),
+      okText: t('pages.settings.firewall.takeoverConfirmOk'),
+      okButtonProps: { danger: true },
+      cancelText: t('cancel'),
+      onOk: () => runAction(() =>
+        HttpUtil.post('/panel/api/server/firewall/takeover', { confirm: true }, JSON_HEADERS),
+      ),
+    });
+  }
+
   function onEnable() {
     modal.confirm({
       title: t('pages.settings.firewall.enableConfirmTitle'),
@@ -250,6 +271,42 @@ export default function FirewallTab() {
 
         {status?.message && !status.installed && (
           <Alert type="warning" showIcon className="firewall-alert" title={status.message || t('pages.settings.firewall.notInstalled')} />
+        )}
+
+        {status?.takeoverRecommended && (
+          <Alert
+            type="error"
+            showIcon
+            className="firewall-alert"
+            title={t('pages.settings.firewall.takeoverTitle')}
+            description={(
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <span>{t('pages.settings.firewall.takeoverDesc')}</span>
+                {(status.foreign || []).filter((fw) => fw.active).length > 0 && (
+                  <Space wrap>
+                    {(status.foreign || []).filter((fw) => fw.active).map((fw) => (
+                      <Tag key={fw.name} color="error">{fw.name}: {fw.detail || t('pages.settings.firewall.foreignActive')}</Tag>
+                    ))}
+                  </Space>
+                )}
+                <Button danger type="primary" loading={acting} onClick={onTakeover}>
+                  {t('pages.settings.firewall.takeoverButton')}
+                </Button>
+              </Space>
+            )}
+          />
+        )}
+
+        {(status?.foreign || []).length > 0 && !status?.takeoverRecommended && (
+          <SettingListItem paddings="small" title={t('pages.settings.firewall.foreignTitle')}>
+            <Space wrap>
+              {(status?.foreign || []).map((fw) => (
+                <Tag key={fw.name} color={fw.active ? 'error' : 'default'}>
+                  {fw.name}: {fw.active ? t('pages.settings.firewall.foreignActive') : t('pages.settings.firewall.foreignInactive')}
+                </Tag>
+              ))}
+            </Space>
+          </SettingListItem>
         )}
 
         <SettingListItem paddings="small" title={t('pages.settings.firewall.installed')}>

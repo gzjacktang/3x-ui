@@ -80,3 +80,21 @@ func (a *ServerController) deleteFirewallRule(c *gin.Context) {
 	}
 	jsonMsg(c, I18nWeb(c, "pages.settings.firewall.deleteSuccess"), err)
 }
+
+type firewallTakeoverRequest struct {
+	Confirm bool `json:"confirm"`
+}
+
+func (a *ServerController) takeoverFirewall(c *gin.Context) {
+	var req firewallTakeoverRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.settings.firewall.invalidRequest"), err)
+		return
+	}
+	result, err := a.firewallService().Takeover(req.Confirm)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.settings.firewall.takeoverFailed"), err)
+		return
+	}
+	jsonMsgObj(c, I18nWeb(c, "pages.settings.firewall.takeoverSuccess"), result, nil)
+}

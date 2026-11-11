@@ -978,7 +978,18 @@
         "inboundHintsEmpty": "入站端口均已放行（或防火墙未启用）。",
         "allowInbound": "放行",
         "yes": "是",
-        "no": "否"
+        "no": "否",
+        "takeoverTitle": "检测到非 UFW 的主机防火墙",
+        "takeoverDesc": "系统上似乎有 nftables / iptables / firewalld 在限制入站，而 UFW 尚未接管。可先备份旧规则、停用旧防火墙，再由 UFW 接管并保护 SSH 与面板端口。",
+        "takeoverButton": "关闭旧防火墙并切换到 UFW",
+        "takeoverConfirmTitle": "切换到 UFW？",
+        "takeoverConfirmDesc": "切换过程中会短暂开放入站端口以清理旧防火墙，随后启用 UFW 并放行 SSH 与面板端口。旧规则会备份到 /etc/x-ui/firewall-backups/。请确认你接受这段短暂暴露窗口。",
+        "takeoverConfirmOk": "我了解风险，切换到 UFW",
+        "takeoverSuccess": "已切换到 UFW",
+        "takeoverFailed": "防火墙接管失败",
+        "foreignTitle": "已探测到的主机防火墙",
+        "foreignActive": "生效/限制中",
+        "foreignInactive": "已安装"
       }
     },
     "xray": {

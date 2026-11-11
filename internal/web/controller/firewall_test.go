@@ -18,8 +18,9 @@ func TestFirewallRoutesRegistered(t *testing.T) {
 		"/panel/api/server/firewall/install": http.MethodPost,
 		"/panel/api/server/firewall/enable":  http.MethodPost,
 		"/panel/api/server/firewall/disable": http.MethodPost,
-		"/panel/api/server/firewall/allow":   http.MethodPost,
-		"/panel/api/server/firewall/delete":  http.MethodPost,
+		"/panel/api/server/firewall/allow":    http.MethodPost,
+		"/panel/api/server/firewall/delete":   http.MethodPost,
+		"/panel/api/server/firewall/takeover": http.MethodPost,
 	}
 	found := map[string]string{}
 	for _, r := range engine.Routes() {
