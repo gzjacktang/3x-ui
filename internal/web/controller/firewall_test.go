@@ -14,10 +14,10 @@ func TestFirewallRoutesRegistered(t *testing.T) {
 	NewServerController(g)
 
 	want := map[string]string{
-		"/panel/api/server/firewall/status":  http.MethodGet,
-		"/panel/api/server/firewall/install": http.MethodPost,
-		"/panel/api/server/firewall/enable":  http.MethodPost,
-		"/panel/api/server/firewall/disable": http.MethodPost,
+		"/panel/api/server/firewall/status":   http.MethodGet,
+		"/panel/api/server/firewall/install":  http.MethodPost,
+		"/panel/api/server/firewall/enable":   http.MethodPost,
+		"/panel/api/server/firewall/disable":  http.MethodPost,
 		"/panel/api/server/firewall/allow":    http.MethodPost,
 		"/panel/api/server/firewall/delete":   http.MethodPost,
 		"/panel/api/server/firewall/takeover": http.MethodPost,

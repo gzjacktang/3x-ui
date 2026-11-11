@@ -89,7 +89,7 @@ func TestEnableAllowsProtectedThenEnables(t *testing.T) {
 
 	var calls [][]string
 	svc := &Service{
-		SSHConfig: sshPath,
+		SSHConfig:   sshPath,
 		PanelPortFn: func() (int, error) { return 2053, nil },
 		LookPath: func(file string) (string, error) {
 			if file == "ufw" {

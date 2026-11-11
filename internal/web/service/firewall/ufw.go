@@ -61,14 +61,14 @@ type ProtectedPort struct {
 }
 
 type Status struct {
-	Installed            bool              `json:"installed"`
-	Active               bool              `json:"active"`
-	Available            bool              `json:"available"`
-	Rules                []Rule            `json:"rules"`
-	ProtectedPorts       []ProtectedPort   `json:"protectedPorts"`
-	Foreign              []ForeignFirewall `json:"foreign"`
-	TakeoverRecommended  bool              `json:"takeoverRecommended"`
-	Message              string            `json:"message,omitempty"`
+	Installed           bool              `json:"installed"`
+	Active              bool              `json:"active"`
+	Available           bool              `json:"available"`
+	Rules               []Rule            `json:"rules"`
+	ProtectedPorts      []ProtectedPort   `json:"protectedPorts"`
+	Foreign             []ForeignFirewall `json:"foreign"`
+	TakeoverRecommended bool              `json:"takeoverRecommended"`
+	Message             string            `json:"message,omitempty"`
 }
 
 type PortSpec struct {
