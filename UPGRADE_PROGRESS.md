@@ -87,5 +87,6 @@
 - 没有本地 MTProto 入站时不再每 10 秒查询数据库。新增或修改 MTProto 入站、更换数据库后会重新检查；禁用入站仍保留配额重置及恢复所需的检查。全局流量和限额继续兼容旧数据，存在性检查只读一行，不再计数整表。
 - 正式前端不再打包 sourcemap。需要本地调试时，可以在 `frontend` 下执行 `npm run build -- --sourcemap`。
 - 内置 Xray 与 Go SDK 仍为 `26.10.31`。等含 [Mux 并发修复](https://github.com/XTLS/Xray-core/pull/7375) 的正式版，再同步升级内核、SDK 及新旧配置字段。此次未在 VPS 测量 CPU、内存和线路速度。
+- `v3.6.1` 面板使用 Go `1.27.4` 构建，修复发布前扫描发现的 [`GO-2026-6859`](https://pkg.go.dev/vuln/GO-2026-6859)。不改变内置 Xray 或面板的 MPTCP 防护。
 
 本机验证：完整 Go 测试和构建、改动相关 Go 竞态测试、前端类型检查、ESLint、838 个前端用例（含 Chromium Storybook）及 Vite 生产构建均通过。生产构建目录中没有 `.map` 文件。

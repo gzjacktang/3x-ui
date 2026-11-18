@@ -1,6 +1,6 @@
 module github.com/mhsanaei/3x-ui/v3
 
-go 1.27.3
+go 1.27.4
 
 // Reduce exposure to CVE-2026-98432 on unpatched Linux hosts.
 godebug multipathtcp=0
