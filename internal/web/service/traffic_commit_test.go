@@ -48,6 +48,25 @@ func TestAddTrafficCommitsDespiteDisableHelperError(t *testing.T) {
 	}
 }
 
+func TestAddTrafficStillEnforcesLimitsWithoutNewBytes(t *testing.T) {
+	db := initTrafficTestDB(t)
+	svc := &InboundService{}
+	expired := &model.Inbound{UserId: 1, Tag: "in-expired", Enable: true, Port: 43002, Protocol: model.VLESS, ExpiryTime: 1, Settings: `{"clients":[]}`}
+	if err := db.Create(expired).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedClientRow(t, "already-over-cap", expired.Id, 60, 60, 100)
+	if _, disabled, err := svc.AddTraffic(nil, nil); err != nil || !disabled {
+		t.Fatalf("idle traffic poll: client disabled=%v, err=%v", disabled, err)
+	}
+	if err := db.First(expired, expired.Id).Error; err != nil || expired.Enable {
+		t.Fatalf("expired inbound: enabled=%v, err=%v", expired.Enable, err)
+	}
+	if client := readTraffic(t, db, "already-over-cap"); client.Enable || client.Up != 60 || client.Down != 60 {
+		t.Fatalf("over-quota client should be disabled with counters untouched: %+v", client)
+	}
+}
+
 func TestResetAllTrafficsReenablesDepletedClients(t *testing.T) {
 	db := initTrafficTestDB(t)
 	svc := &ClientService{}

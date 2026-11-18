@@ -147,21 +147,11 @@ func (j *XrayTrafficJob) Run() {
 		logger.Warning("get client traffics for websocket failed:", statsErr)
 	}
 
-	var lastOnlineMap map[string]int64
-	if snapshot {
-		if lastOnlineMap, err = j.inboundService.GetClientsLastOnline(); err != nil {
-			logger.Warning("get clients last online failed:", err)
+	lastOnlineMap := make(map[string]int64, len(stats))
+	for _, ct := range stats {
+		if ct != nil {
+			lastOnlineMap[ct.Email] = ct.LastOnline
 		}
-	} else {
-		lastOnlineMap = make(map[string]int64, len(stats))
-		for _, ct := range stats {
-			if ct != nil {
-				lastOnlineMap[ct.Email] = ct.LastOnline
-			}
-		}
-	}
-	if lastOnlineMap == nil {
-		lastOnlineMap = make(map[string]int64)
 	}
 	onlineClients := j.inboundService.GetOnlineClients()
 	if onlineClients == nil {

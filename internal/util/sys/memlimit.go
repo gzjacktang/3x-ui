@@ -3,7 +3,9 @@ package sys
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -89,26 +91,47 @@ func MemoryReleaseIntervalMinutes() int {
 	return defaultReleaseMinutes
 }
 
-// cgroupMemoryLimit reads the container memory limit from cgroup v2 then v1.
-// A "max" value or the v1 unlimited sentinel (~8 EiB) means no limit at this
-// level, so it reports not-found and the caller falls back to the Go default. The
-// files are absent off Linux, which also yields not-found.
 func cgroupMemoryLimit() (int64, bool) {
-	const unlimited = int64(1) << 62
+	self, _ := os.ReadFile("/proc/self/cgroup")
+	return cgroupMemoryLimitAt(string(self), "/sys/fs/cgroup")
+}
 
-	if b, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
-		if s := strings.TrimSpace(string(b)); s != "" && s != "max" {
-			if v, err := strconv.ParseInt(s, 10, 64); err == nil && v > 0 && v < unlimited {
-				return v, true
+func cgroupMemoryLimitAt(selfCgroup, root string) (int64, bool) {
+	if limit, ok := tightestLimit(root, ownCgroupPath(selfCgroup, "0", ""), "memory.max"); ok {
+		return limit, true
+	}
+	return tightestLimit(filepath.Join(root, "memory"), ownCgroupPath(selfCgroup, "", "memory"), "memory.limit_in_bytes")
+}
+
+func ownCgroupPath(selfCgroup, id, controller string) string {
+	for line := range strings.Lines(selfCgroup) {
+		fields := strings.SplitN(strings.TrimSpace(line), ":", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		if (id != "" && fields[0] == id && fields[1] == "") ||
+			(controller != "" && slices.Contains(strings.Split(fields[1], ","), controller)) {
+			return fields[2]
+		}
+	}
+	return "/"
+}
+
+/* tightestLimit stays inside root even if a cgroup namespace reports ../ paths. */
+func tightestLimit(root, rel, name string) (int64, bool) {
+	const unlimited = int64(1) << 62
+	root = filepath.Clean(root)
+	var limit int64
+	for dir := filepath.Join(root, filepath.Clean("/"+rel)); ; dir = filepath.Dir(dir) {
+		if b, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			v, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+			if err == nil && v > 0 && v < unlimited && (limit == 0 || v < limit) {
+				limit = v
 			}
 		}
-	}
-
-	if b, err := os.ReadFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"); err == nil {
-		if v, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil && v > 0 && v < unlimited {
-			return v, true
+		if dir == root {
+			break
 		}
 	}
-
-	return 0, false
+	return limit, limit > 0
 }

@@ -136,6 +136,7 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	excludedClients, excludedInbounds := 0, 0
 	for _, inbound := range inbounds {
 		if !inbound.Enable {
 			continue
@@ -168,10 +169,11 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 
 		var finalClients []any
 		var wgPeers []any
+		excludedBefore := excludedClients
 		for i := range dbClients {
 			c := dbClients[i]
 			if enable, exists := enableMap[c.Email]; exists && !enable {
-				logger.Infof("Remove Inbound User %s due to expiration or traffic limit", c.Email)
+				excludedClients++
 				continue
 			}
 			if !c.Enable {
@@ -220,6 +222,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 				continue
 			}
 			finalClients = append(finalClients, entry)
+		}
+		if excludedClients > excludedBefore {
+			excludedInbounds++
 		}
 
 		var mutated bool
@@ -338,6 +343,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		injectPanelEgress(xrayConfig, egressTag)
 	}
 
+	if excludedClients > 0 {
+		logger.Infof("Xray config generated: excluded %d disabled client entries across %d inbounds", excludedClients, excludedInbounds)
+	}
 	return xrayConfig, nil
 }
 
@@ -706,41 +714,14 @@ func (s *XrayService) GetXrayTraffic() ([]*xray.Traffic, []*xray.ClientTraffic, 
 	return traffic, clientTraffic, nil
 }
 
-// GetOnlineUsers returns connection-based online users (email + source IPs)
-// from the running core's online-stats API. ok=false means the API is not
-// available — xray isn't running or the core predates the online-stats RPCs —
-// and callers must use the legacy traffic-delta / access-log paths. The
-// capability is probed lazily per process: an Unimplemented answer pins this
-// core as unsupported until the next restart, while transient errors leave the
-// capability undecided so a flaky poll can't lock in legacy mode.
 func (s *XrayService) GetOnlineUsers() ([]xray.OnlineUser, bool, error) {
-	if !s.IsXrayRunning() {
+	lock.Lock()
+	core := p
+	lock.Unlock()
+	if core == nil {
 		return nil, false, nil
 	}
-	if p.OnlineAPISupport() == xray.OnlineAPIUnsupported {
-		return nil, false, nil
-	}
-	if err := s.xrayAPI.Init(p.GetAPIPort()); err != nil {
-		logger.Debug("Failed to initialize Xray API:", err)
-		return nil, false, err
-	}
-	defer s.xrayAPI.Close()
-
-	users, err := s.xrayAPI.GetOnlineUsers()
-	if err != nil {
-		if xray.IsUnimplementedErr(err) {
-			p.SetOnlineAPISupport(xray.OnlineAPIUnsupported)
-			logger.Info("xray core does not support the online-stats API; falling back to traffic-delta onlines and access-log IP limit")
-			return nil, false, nil
-		}
-		logger.Debug("Failed to fetch Xray online users:", err)
-		return nil, false, err
-	}
-	if p.OnlineAPISupport() == xray.OnlineAPIUnknown {
-		p.SetOnlineAPISupport(xray.OnlineAPISupported)
-		logger.Info("xray core supports the online-stats API; using connection-based onlines and access-log-free IP limit")
-	}
-	return users, true, nil
+	return core.GetOnlineUsers()
 }
 
 // BalancerStatus is the live view of one balancer for the panel UI. Running

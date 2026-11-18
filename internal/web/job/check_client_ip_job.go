@@ -50,15 +50,15 @@ func NewCheckClientIpJob() *CheckClientIpJob {
 }
 
 func (j *CheckClientIpJob) Run() {
+	if !isFail2BanEnabled() {
+		return
+	}
+
 	observed, apiMode := j.collectFromOnlineAPI()
 	if !apiMode {
 		// xray is down or predates the online-stats API. There is no access-log
 		// fallback anymore, so there is nothing to do this run.
 		logger.Debug("[LimitIP] online-stats API unavailable this run; skipping")
-		return
-	}
-
-	if !isFail2BanEnabled() {
 		return
 	}
 

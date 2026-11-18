@@ -184,6 +184,7 @@ type process struct {
 	// restart/version switch, so the flag resets to Unknown and is re-probed
 	// lazily by the first caller.
 	onlineAPISupport atomic.Int32
+	onlineStats      onlineStatsSnapshot
 
 	config     *Config
 	configPath string // if set, use this path instead of GetConfigPath() and remove on Stop

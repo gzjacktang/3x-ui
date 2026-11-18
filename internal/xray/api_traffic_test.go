@@ -101,6 +101,27 @@ func TestGetTrafficFirstPollIsBaselineOnly(t *testing.T) {
 	}
 }
 
+func TestGetTrafficOmitsUnchangedCounters(t *testing.T) {
+	inbound := "inbound>>>proxy>>>traffic>>>uplink"
+	outbound := "outbound>>>direct>>>traffic>>>downlink"
+	user := "user>>>alice>>>traffic>>>downlink"
+	api := startFakeStats(t, [][]*statsService.Stat{
+		{stat(inbound, 90), stat(outbound, 60), stat(user, 70)},
+		{stat(inbound, 90), stat(outbound, 60), stat(user, 70)},
+		{stat(inbound, 95), stat(outbound, 60), stat(user, 77)},
+	})
+	if _, _, err := api.GetTraffic(); err != nil {
+		t.Fatal(err)
+	}
+	if tags, clients, err := api.GetTraffic(); err != nil || len(tags) != 0 || len(clients) != 0 {
+		t.Fatalf("idle reply: %d tags, %d clients, %v; want no deltas", len(tags), len(clients), err)
+	}
+	tags, clients, err := api.GetTraffic()
+	if err != nil || len(tags) != 1 || tags[0].Tag != "proxy" || tags[0].Up != 5 || len(clients) != 1 || clients[0].Email != "alice" || clients[0].Down != 7 {
+		t.Fatalf("expected only proxy +5 up and alice +7 down, got tags=%v clients=%v err=%v", tags, clients, err)
+	}
+}
+
 // TestGetTrafficCountsNewStatFromZero is the regression for a new client's
 // traffic being dropped: xray creates a counter on first use, so a name that
 // appears after the baseline poll starts at zero and every byte in it is new.
