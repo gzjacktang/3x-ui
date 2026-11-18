@@ -902,6 +902,7 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	if err != nil {
 		return inbound, false, err
 	}
+	noteLocalMtprotoConfig(inbound)
 	if postCommitApply != nil {
 		postCommitApply()
 	}
@@ -1385,6 +1386,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	if txErr != nil {
 		return inbound, false, txErr
 	}
+	noteLocalMtprotoConfig(oldInbound)
 	if postCommitApply != nil {
 		postCommitApply()
 	}

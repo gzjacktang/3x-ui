@@ -99,16 +99,16 @@ func chunkGlobalRows(rows []model.ClientGlobalTraffic, size int) [][]model.Clien
 	return out
 }
 
+func hasGlobalTraffic(db *gorm.DB) bool {
+	var probe []int
+	return db.Model(&model.ClientGlobalTraffic{}).Select("1").Limit(1).Find(&probe).Error == nil && len(probe) != 0
+}
+
 // overlayGlobalTraffic raises Up/Down on the given rows to the largest global
 // value any master pushed for that email. Read-path only — callers hand it
 // rows about to be serialized for display; the stored counters are untouched.
 func overlayGlobalTraffic(db *gorm.DB, rows []*xray.ClientTraffic) {
-	if len(rows) == 0 {
-		return
-	}
-	// Cheap short-circuit for the common case (a panel no master pushes to).
-	var probe int64
-	if err := db.Model(&model.ClientGlobalTraffic{}).Limit(1).Count(&probe).Error; err != nil || probe == 0 {
+	if len(rows) == 0 || !hasGlobalTraffic(db) {
 		return
 	}
 

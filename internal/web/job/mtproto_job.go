@@ -1,10 +1,15 @@
 package job
 
 import (
+	"sync"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/mtproto"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
+
+	"gorm.io/gorm"
 )
 
 // MtprotoJob reconciles the running mtg sidecar processes against the enabled
@@ -13,6 +18,9 @@ import (
 // and inbound traffic accounting.
 type MtprotoJob struct {
 	inboundService service.InboundService
+	mu             sync.Mutex
+	idleDB         *gorm.DB
+	idleRevision   uint64
 }
 
 // NewMtprotoJob creates a new mtproto reconcile/traffic job instance.
@@ -23,9 +31,31 @@ func NewMtprotoJob() *MtprotoJob {
 // Run reconciles desired mtproto inbounds with running mtg processes and records
 // per-client traffic deltas and online status.
 func (j *MtprotoJob) Run() {
+	/* The boot-time run is outside cron's no-overlap wrapper. */
+	if !j.mu.TryLock() {
+		return
+	}
+	defer j.mu.Unlock()
+	db, revision := database.GetDB(), service.LocalMtprotoConfigRevision()
+	if db == nil || (j.idleDB == db && j.idleRevision == revision) {
+		return
+	}
+	j.idleDB = nil
+
 	desired, err := j.inboundService.DesiredMtprotoInstances()
 	if err != nil {
 		logger.Warning("mtproto job: get desired instances failed:", err)
+		return
+	}
+	mgr := mtproto.GetManager()
+	mgr.Reconcile(desired)
+	if len(desired) == 0 {
+		configured, err := j.inboundService.HasLocalMtprotoInbounds()
+		if err != nil {
+			logger.Warning("mtproto job: check for configured inbounds failed:", err)
+		} else if !configured {
+			j.idleDB, j.idleRevision = db, revision
+		}
 		return
 	}
 
@@ -37,9 +67,6 @@ func (j *MtprotoJob) Run() {
 			routedTags[inst.Tag] = true
 		}
 	}
-
-	mgr := mtproto.GetManager()
-	mgr.Reconcile(desired)
 
 	deltas, onlineEmails := mgr.CollectTraffic()
 

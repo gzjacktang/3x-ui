@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
@@ -9,6 +10,26 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/mtproto"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
+
+var localMtprotoConfigRevision atomic.Uint64
+
+func LocalMtprotoConfigRevision() uint64 {
+	return localMtprotoConfigRevision.Load()
+}
+
+func noteLocalMtprotoConfig(inbound *model.Inbound) {
+	if inbound.NodeID == nil && inbound.Protocol == model.MTProto {
+		localMtprotoConfigRevision.Add(1)
+	}
+}
+
+/* Include disabled inbounds so a quota reset can enable them without a save. */
+func (s *InboundService) HasLocalMtprotoInbounds() (bool, error) {
+	var ids []int
+	err := database.GetDB().Model(&model.Inbound{}).Where("protocol = ? AND node_id IS NULL", model.MTProto).
+		Limit(1).Pluck("id", &ids).Error
+	return len(ids) > 0, err
+}
 
 // DesiredMtprotoInstances derives the mtg sidecar configs this panel should be
 // running: one instance per enabled local mtproto inbound, serving only the

@@ -125,8 +125,7 @@ const depletedClientsCondLocal = `((total > 0 AND up + down >= total)
 // needed to enforce combined quota. Both variants take the same single
 // expiry_time placeholder, so callers pass identical args either way.
 func depletedCond(tx *gorm.DB) string {
-	var probe int64
-	if err := tx.Model(&model.ClientGlobalTraffic{}).Limit(1).Count(&probe).Error; err == nil && probe > 0 {
+	if hasGlobalTraffic(tx) {
 		return depletedClientsCond
 	}
 	return depletedClientsCondLocal
