@@ -649,10 +649,6 @@ func (j *CheckClientIpJob) updateInboundClientIpsWithSeen(tx *gorm.DB, inboundCl
 	return shouldCleanLog, banned, banLog
 }
 
-func (j *CheckClientIpJob) filterAdvancedSinceLastBan(email string, banned []IPWithTimestamp) []IPWithTimestamp {
-	return filterAdvancedSinceLastBanMap(&j.bannedSeen, email, banned)
-}
-
 func filterAdvancedSinceLastBanMap(seen *map[string]int64, email string, banned []IPWithTimestamp) []IPWithTimestamp {
 	if *seen == nil {
 		*seen = make(map[string]int64)
@@ -678,10 +674,6 @@ func filterAdvancedSinceLastBanMap(seen *map[string]int64, email string, banned 
 		}
 	}
 	return actionable
-}
-
-func (j *CheckClientIpJob) disconnectClientTemporarily(inbound *model.Inbound, clientEmail string, clients []model.Client) {
-	j.disconnectClientTemporarilyForProcess(inbound, clientEmail, clients, nil)
 }
 
 func (j *CheckClientIpJob) disconnectClientTemporarilyForProcess(inbound *model.Inbound, clientEmail string, clients []model.Client, sampleProcess *xray.Process) {
