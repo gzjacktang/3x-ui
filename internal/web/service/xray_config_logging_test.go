@@ -145,8 +145,9 @@ func TestGetXrayConfigFailedGenerationHasNoExclusionLog(t *testing.T) {
 	marker := t.Name()
 	logger.Info(marker)
 	cfg, err := (&XrayService{}).GetXrayConfig()
-	if cfg != nil || err == nil || !strings.Contains(err.Error(), "no such table: inbound_fallbacks") {
-		t.Fatalf("expected missing inbound_fallbacks table error, got cfg=%v, err=%v", cfg, err)
+	const wantErr = "no such table: inbound_fallbacks"
+	if cfg != nil || err == nil || err.Error() != wantErr {
+		t.Fatalf("GetXrayConfig() = (%v, %v), want (nil, %q)", cfg, err, wantErr)
 	}
 	for _, line := range configLogsSince(t, marker) {
 		if strings.Contains(line, "Xray config generated:") || strings.Contains(line, "Remove Inbound User") {

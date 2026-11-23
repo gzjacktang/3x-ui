@@ -714,20 +714,27 @@ func (s *XrayService) GetXrayTraffic() ([]*xray.Traffic, []*xray.ClientTraffic, 
 	return traffic, clientTraffic, nil
 }
 
+type OnlineUsersSample struct {
+	Users   []xray.OnlineUser
+	Process *xray.Process
+}
+
 func (s *XrayService) GetOnlineUsers() ([]xray.OnlineUser, bool, error) {
-	return s.getOnlineUsers(false)
+	sample, supported, err := s.GetOnlineUsersSample(false)
+	return sample.Users, supported, err
 }
 
 func (s *XrayService) GetOnlineUsersFresh() ([]xray.OnlineUser, bool, error) {
-	return s.getOnlineUsers(true)
+	sample, supported, err := s.GetOnlineUsersSample(true)
+	return sample.Users, supported, err
 }
 
-func (s *XrayService) getOnlineUsers(fresh bool) ([]xray.OnlineUser, bool, error) {
+func (s *XrayService) GetOnlineUsersSample(fresh bool) (OnlineUsersSample, bool, error) {
 	lock.Lock()
 	core := p
 	lock.Unlock()
 	if core == nil {
-		return nil, false, nil
+		return OnlineUsersSample{}, false, nil
 	}
 	var (
 		users     []xray.OnlineUser
@@ -740,15 +747,68 @@ func (s *XrayService) getOnlineUsers(fresh bool) ([]xray.OnlineUser, bool, error
 		users, supported, err = core.GetOnlineUsers()
 	}
 	if err != nil || !supported {
-		return users, supported, err
+		return OnlineUsersSample{}, supported, err
 	}
 	lock.Lock()
-	current := p == core
+	current := p == core && core.IsRunning()
 	lock.Unlock()
 	if !current {
-		return nil, false, nil
+		return OnlineUsersSample{}, false, nil
 	}
-	return users, true, nil
+	return OnlineUsersSample{
+		Users:   users,
+		Process: core,
+	}, true, nil
+}
+
+func (s *XrayService) IsCurrentProcess(core *xray.Process) bool {
+	if core == nil {
+		return false
+	}
+	lock.Lock()
+	current := p == core && core.IsRunning()
+	lock.Unlock()
+	return current
+}
+
+func (s *XrayService) RemoveUserForProcess(core *xray.Process, inboundTag, email string) (bool, error) {
+	if core == nil {
+		return false, nil
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	if p != core || !core.IsRunning() {
+		return false, nil
+	}
+	var api xray.XrayAPI
+	if err := api.Init(core.GetAPIPort()); err != nil {
+		return false, err
+	}
+	defer api.Close()
+	if err := api.RemoveUser(inboundTag, email); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *XrayService) AddUserForProcess(core *xray.Process, protocol, inboundTag string, clientConfig map[string]any) (bool, error) {
+	if core == nil {
+		return false, nil
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	if p != core || !core.IsRunning() {
+		return false, nil
+	}
+	var api xray.XrayAPI
+	if err := api.Init(core.GetAPIPort()); err != nil {
+		return false, err
+	}
+	defer api.Close()
+	if err := api.AddUser(protocol, inboundTag, clientConfig); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // BalancerStatus is the live view of one balancer for the panel UI. Running

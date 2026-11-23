@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
 
@@ -341,25 +343,65 @@ func fakeFail2BanClient(t *testing.T) string {
 }
 
 type stubOnlineUsersProvider struct {
-	running    bool
-	cached     []xray.OnlineUser
-	fresh      []xray.OnlineUser
-	cachedHits int
-	freshHits  int
+	running      bool
+	cached       []xray.OnlineUser
+	fresh        []xray.OnlineUser
+	sampledProc  *xray.Process
+	currentProc  *xray.Process
+	cachedHits   int
+	freshHits    int
+	removeCalls  []*xray.Process
+	addCalls     []*xray.Process
+	onSample     func()
+	onCheckCalls int
+	onCheck      func(call int)
 }
 
 func (s *stubOnlineUsersProvider) IsXrayRunning() bool {
 	return s.running
 }
 
-func (s *stubOnlineUsersProvider) GetOnlineUsers() ([]xray.OnlineUser, bool, error) {
-	s.cachedHits++
-	return s.cached, true, nil
+func (s *stubOnlineUsersProvider) GetOnlineUsersSample(fresh bool) (service.OnlineUsersSample, bool, error) {
+	proc := s.sampledProc
+	if proc == nil {
+		proc = s.currentProc
+	}
+	var users []xray.OnlineUser
+	if fresh {
+		s.freshHits++
+		users = s.fresh
+	} else {
+		s.cachedHits++
+		users = s.cached
+	}
+	if s.onSample != nil {
+		s.onSample()
+	}
+	return service.OnlineUsersSample{Users: users, Process: proc}, true, nil
 }
 
-func (s *stubOnlineUsersProvider) GetOnlineUsersFresh() ([]xray.OnlineUser, bool, error) {
-	s.freshHits++
-	return s.fresh, true, nil
+func (s *stubOnlineUsersProvider) IsCurrentProcess(core *xray.Process) bool {
+	s.onCheckCalls++
+	if s.onCheck != nil {
+		s.onCheck(s.onCheckCalls)
+	}
+	return core != nil && core == s.currentProc
+}
+
+func (s *stubOnlineUsersProvider) RemoveUserForProcess(core *xray.Process, _, _ string) (bool, error) {
+	if core == nil || core != s.currentProc {
+		return false, nil
+	}
+	s.removeCalls = append(s.removeCalls, core)
+	return true, nil
+}
+
+func (s *stubOnlineUsersProvider) AddUserForProcess(core *xray.Process, _, _ string, _ map[string]any) (bool, error) {
+	if core == nil || core != s.currentProc {
+		return false, nil
+	}
+	s.addCalls = append(s.addCalls, core)
+	return true, nil
 }
 
 func TestCheckClientIpJobRunUsesFreshSamplingForEnforcementAndCacheForCollection(t *testing.T) {
@@ -371,8 +413,11 @@ func TestCheckClientIpJobRunUsesFreshSamplingForEnforcementAndCacheForCollection
 
 		now := time.Now().Unix()
 		seedClientIps(t, "alice@example.test", []IPWithTimestamp{{IP: "2.2.2.2", Timestamp: now - 10}})
+		proc := xray.NewProcess(&xray.Config{})
 		provider := &stubOnlineUsersProvider{
-			running: true,
+			running:     true,
+			sampledProc: proc,
+			currentProc: proc,
 			cached: []xray.OnlineUser{{
 				Email: "alice@example.test",
 				IPs: []xray.OnlineIP{
@@ -388,7 +433,7 @@ func TestCheckClientIpJobRunUsesFreshSamplingForEnforcementAndCacheForCollection
 			}},
 		}
 
-		ipJob := &CheckClientIpJob{onlineSource: provider}
+		ipJob := &CheckClientIpJob{onlineSource: provider, disconnectWait: func() {}}
 		ipJob.Run()
 
 		if provider.freshHits != 1 || provider.cachedHits != 0 {
@@ -405,19 +450,136 @@ func TestCheckClientIpJobRunUsesFreshSamplingForEnforcementAndCacheForCollection
 		seedLinkedInboundWithClient(t, "vless-collect-only", "bob@example.test", 0)
 
 		now := time.Now().Unix()
+		proc := xray.NewProcess(&xray.Config{})
 		provider := &stubOnlineUsersProvider{
-			running: true,
+			running:     true,
+			sampledProc: proc,
+			currentProc: proc,
 			cached: []xray.OnlineUser{{
 				Email: "bob@example.test",
 				IPs:   []xray.OnlineIP{{IP: "3.3.3.3", LastSeen: now}},
 			}},
 		}
 
-		ipJob := &CheckClientIpJob{onlineSource: provider}
+		ipJob := &CheckClientIpJob{onlineSource: provider, disconnectWait: func() {}}
 		ipJob.Run()
 
 		if provider.cachedHits != 1 || provider.freshHits != 0 {
 			t.Fatalf("collection hits cached=%d fresh=%d, want cached=1 fresh=0", provider.cachedHits, provider.freshHits)
+		}
+	})
+}
+
+func TestCheckClientIpJobAbortsEnforcementAcrossXrayRestart(t *testing.T) {
+	seedOverLimit := func(t *testing.T, tag, email string) int64 {
+		t.Helper()
+		setupIntegrationDB(t)
+		t.Setenv("XUI_ENABLE_FAIL2BAN", "true")
+		fakeFail2BanClient(t)
+		seedLinkedInboundWithClient(t, tag, email, 1)
+		now := time.Now().Unix()
+		seedClientIps(t, email, []IPWithTimestamp{{IP: "1.1.1.1", Timestamp: now - 10}})
+		return now
+	}
+
+	t.Run("restart after sampling skips ban log and disconnect", func(t *testing.T) {
+		now := seedOverLimit(t, "vless-restart-preban", "alice@example.test")
+		gen1 := xray.NewProcess(&xray.Config{})
+		gen2 := xray.NewProcess(&xray.Config{})
+		provider := &stubOnlineUsersProvider{
+			running:     true,
+			sampledProc: gen1,
+			currentProc: gen1,
+			fresh: []xray.OnlineUser{{
+				Email: "alice@example.test",
+				IPs: []xray.OnlineIP{
+					{IP: "1.1.1.1", LastSeen: now - 5},
+					{IP: "2.2.2.2", LastSeen: now},
+				},
+			}},
+		}
+		provider.onSample = func() {
+			provider.currentProc = gen2
+		}
+
+		ipJob := &CheckClientIpJob{onlineSource: provider, disconnectWait: func() {}}
+		ipJob.Run()
+
+		if _, err := os.Stat(xray.GetIPLimitLogPath()); !os.IsNotExist(err) {
+			t.Fatalf("ban log created after Xray restart: stat err = %v", err)
+		}
+		if len(provider.removeCalls) != 0 || len(provider.addCalls) != 0 {
+			t.Fatalf("unexpected user mutations after restart: remove=%d add=%d", len(provider.removeCalls), len(provider.addCalls))
+		}
+		if len(ipJob.bannedSeen) != 0 {
+			t.Fatalf("aborted scan mutated bannedSeen: %+v", ipJob.bannedSeen)
+		}
+	})
+
+	t.Run("restart after ban log skips disconnect on new process", func(t *testing.T) {
+		now := seedOverLimit(t, "vless-restart-predisconnect", "bob@example.test")
+		gen1 := xray.NewProcess(&xray.Config{})
+		gen2 := xray.NewProcess(&xray.Config{})
+		provider := &stubOnlineUsersProvider{
+			running:     true,
+			sampledProc: gen1,
+			currentProc: gen1,
+			fresh: []xray.OnlineUser{{
+				Email: "bob@example.test",
+				IPs: []xray.OnlineIP{
+					{IP: "1.1.1.1", LastSeen: now - 5},
+					{IP: "2.2.2.2", LastSeen: now},
+				},
+			}},
+		}
+		provider.onCheck = func(call int) {
+			if call == 5 {
+				provider.currentProc = gen2
+			}
+		}
+
+		ipJob := &CheckClientIpJob{onlineSource: provider, disconnectWait: func() {}}
+		ipJob.Run()
+
+		logBytes, err := os.ReadFile(xray.GetIPLimitLogPath())
+		if err != nil || !strings.Contains(string(logBytes), "Email = bob@example.test") {
+			t.Fatalf("expected ban log before pre-disconnect restart, got %q (err=%v)", string(logBytes), err)
+		}
+		if len(provider.removeCalls) != 0 || len(provider.addCalls) != 0 {
+			t.Fatalf("new process received disconnect after restart: remove=%d add=%d", len(provider.removeCalls), len(provider.addCalls))
+		}
+	})
+
+	t.Run("restart during disconnect wait skips restore on new process", func(t *testing.T) {
+		now := seedOverLimit(t, "vless-restart-midwait", "carol@example.test")
+		gen1 := xray.NewProcess(&xray.Config{})
+		gen2 := xray.NewProcess(&xray.Config{})
+		provider := &stubOnlineUsersProvider{
+			running:     true,
+			sampledProc: gen1,
+			currentProc: gen1,
+			fresh: []xray.OnlineUser{{
+				Email: "carol@example.test",
+				IPs: []xray.OnlineIP{
+					{IP: "1.1.1.1", LastSeen: now - 5},
+					{IP: "2.2.2.2", LastSeen: now},
+				},
+			}},
+		}
+
+		ipJob := &CheckClientIpJob{
+			onlineSource: provider,
+			disconnectWait: func() {
+				provider.currentProc = gen2
+			},
+		}
+		ipJob.Run()
+
+		if len(provider.removeCalls) != 1 || provider.removeCalls[0] != gen1 {
+			t.Fatalf("removeCalls = %v, want single remove on gen1", provider.removeCalls)
+		}
+		if len(provider.addCalls) != 0 {
+			t.Fatalf("addCalls = %v, want no restore on replacement process", provider.addCalls)
 		}
 	})
 }
