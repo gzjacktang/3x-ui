@@ -771,6 +771,21 @@ func (s *XrayService) IsCurrentProcess(core *xray.Process) bool {
 	return current
 }
 
+func (s *XrayService) DoForProcess(core *xray.Process, fn func() error) (bool, error) {
+	if core == nil || fn == nil {
+		return false, nil
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	if p != core || !core.IsRunning() {
+		return false, nil
+	}
+	if err := fn(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *XrayService) RemoveUserForProcess(core *xray.Process, inboundTag, email string) (bool, error) {
 	if core == nil {
 		return false, nil

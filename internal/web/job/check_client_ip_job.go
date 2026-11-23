@@ -31,6 +31,7 @@ type onlineUsersProvider interface {
 	IsXrayRunning() bool
 	GetOnlineUsersSample(fresh bool) (service.OnlineUsersSample, bool, error)
 	IsCurrentProcess(core *xray.Process) bool
+	DoForProcess(core *xray.Process, fn func() error) (bool, error)
 	RemoveUserForProcess(core *xray.Process, inboundTag, email string) (bool, error)
 	AddUserForProcess(core *xray.Process, protocol, inboundTag string, clientConfig map[string]any) (bool, error)
 }
@@ -300,6 +301,11 @@ func (j *CheckClientIpJob) processObservedForProcess(observed map[string]map[str
 	inboundByEmail := j.loadInboundsByEmails(emails)
 	ipRowByEmail := j.loadClientIpRows(emails)
 
+	if enforce && sampleProcess != nil && !j.onlineProvider().IsCurrentProcess(sampleProcess) {
+		logger.Debug("[LimitIP] skipping enforcement: Xray process changed before transaction")
+		return false
+	}
+
 	attribution := make(map[string][]model.ClientIpEntry, len(observed))
 
 	type pendingDisconnect struct {
@@ -328,10 +334,6 @@ func (j *CheckClientIpJob) processObservedForProcess(observed map[string]map[str
 	}()
 
 	for _, email := range emails {
-		if enforce && sampleProcess != nil && !j.onlineProvider().IsCurrentProcess(sampleProcess) {
-			logger.Debug("[LimitIP] aborting enforcement scan: Xray process changed during evaluation")
-			return false
-		}
 		ipTimestamps := observed[email]
 
 		inbound, ok := inboundByEmail[email]
@@ -386,11 +388,6 @@ func (j *CheckClientIpJob) processObservedForProcess(observed map[string]map[str
 		}
 	}
 
-	if enforce && sampleProcess != nil && !j.onlineProvider().IsCurrentProcess(sampleProcess) {
-		logger.Debug("[LimitIP] aborting enforcement commit: Xray process changed before commit")
-		return false
-	}
-
 	if err := tx.Commit().Error; err != nil {
 		j.checkError(err)
 		return shouldCleanLog
@@ -399,15 +396,21 @@ func (j *CheckClientIpJob) processObservedForProcess(observed map[string]map[str
 
 	if sampleProcess != nil {
 		if enforce && len(pendingBans) > 0 {
-			if !j.onlineProvider().IsCurrentProcess(sampleProcess) {
-				logger.Debug("[LimitIP] skipping fail2ban log and disconnects: Xray process changed after commit")
-				return false
-			}
-			if !j.writePendingBanLogs(pendingBans) {
+			ran, err := j.onlineProvider().DoForProcess(sampleProcess, func() error {
+				return j.writePendingBanLogs(pendingBans)
+			})
+			if err != nil {
+				logger.Errorf("failed to open IP limit log file: %s", err)
 				disconnects = nil
 				shouldCleanLog = false
+			} else if !ran {
+				logger.Debug("[LimitIP] skipping fail2ban log and disconnects: Xray process changed before logging")
+				return false
 			} else {
 				j.bannedSeen = stagedSeen
+				for _, item := range pendingBans {
+					logger.Infof("[LIMIT_IP] Client %s: Kept %d live IPs, queued %d old IPs for fail2ban", item.email, item.keptCount, len(item.entries))
+				}
 			}
 		} else {
 			j.bannedSeen = stagedSeen
@@ -444,11 +447,10 @@ func cloneBannedSeen(src map[string]int64) map[string]int64 {
 	return dst
 }
 
-func (j *CheckClientIpJob) writePendingBanLogs(pending []pendingBanLog) bool {
+func (j *CheckClientIpJob) writePendingBanLogs(pending []pendingBanLog) error {
 	logIpFile, err := os.OpenFile(xray.GetIPLimitLogPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		logger.Errorf("failed to open IP limit log file: %s", err)
-		return false
+		return err
 	}
 	defer logIpFile.Close()
 	ipLogger := log.New(logIpFile, "", log.LstdFlags)
@@ -459,9 +461,8 @@ func (j *CheckClientIpJob) writePendingBanLogs(pending []pendingBanLog) bool {
 			j.disAllowedIps = append(j.disAllowedIps, ipTime.IP)
 			ipLogger.Printf("[LIMIT_IP] Email = %s || Disconnecting OLD IP = %s || Timestamp = %d", item.email, ipTime.IP, ipTime.Timestamp)
 		}
-		logger.Infof("[LIMIT_IP] Client %s: Kept %d live IPs, queued %d old IPs for fail2ban", item.email, item.keptCount, len(j.disAllowedIps))
 	}
-	return true
+	return nil
 }
 
 // recordLocalAttribution stores this scan's local observations under this panel's

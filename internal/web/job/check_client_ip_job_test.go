@@ -6,8 +6,12 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
@@ -343,25 +347,35 @@ func fakeFail2BanClient(t *testing.T) string {
 }
 
 type stubOnlineUsersProvider struct {
-	running      bool
-	cached       []xray.OnlineUser
-	fresh        []xray.OnlineUser
-	sampledProc  *xray.Process
-	currentProc  *xray.Process
-	cachedHits   int
-	freshHits    int
-	removeCalls  []*xray.Process
-	addCalls     []*xray.Process
-	onSample     func()
-	onCheckCalls int
-	onCheck      func(call int)
+	mu          sync.Mutex
+	running     bool
+	cached      []xray.OnlineUser
+	fresh       []xray.OnlineUser
+	sampledProc *xray.Process
+	currentProc *xray.Process
+	cachedHits  int
+	freshHits   int
+	removeCalls []*xray.Process
+	addCalls    []*xray.Process
+	onSample    func()
+	onBeforeDo  func()
+	onAfterDo   func(ran bool)
+}
+
+func (s *stubOnlineUsersProvider) setCurrentProcess(core *xray.Process) {
+	s.mu.Lock()
+	s.currentProc = core
+	s.mu.Unlock()
 }
 
 func (s *stubOnlineUsersProvider) IsXrayRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.running
 }
 
 func (s *stubOnlineUsersProvider) GetOnlineUsersSample(fresh bool) (service.OnlineUsersSample, bool, error) {
+	s.mu.Lock()
 	proc := s.sampledProc
 	if proc == nil {
 		proc = s.currentProc
@@ -374,21 +388,49 @@ func (s *stubOnlineUsersProvider) GetOnlineUsersSample(fresh bool) (service.Onli
 		s.cachedHits++
 		users = s.cached
 	}
-	if s.onSample != nil {
-		s.onSample()
+	onSample := s.onSample
+	s.mu.Unlock()
+	if onSample != nil {
+		onSample()
 	}
 	return service.OnlineUsersSample{Users: users, Process: proc}, true, nil
 }
 
 func (s *stubOnlineUsersProvider) IsCurrentProcess(core *xray.Process) bool {
-	s.onCheckCalls++
-	if s.onCheck != nil {
-		s.onCheck(s.onCheckCalls)
-	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return core != nil && core == s.currentProc
 }
 
+func (s *stubOnlineUsersProvider) DoForProcess(core *xray.Process, fn func() error) (bool, error) {
+	if s.onBeforeDo != nil {
+		s.onBeforeDo()
+	}
+	if core == nil || fn == nil {
+		return false, nil
+	}
+	s.mu.Lock()
+	if core != s.currentProc {
+		s.mu.Unlock()
+		if s.onAfterDo != nil {
+			s.onAfterDo(false)
+		}
+		return false, nil
+	}
+	err := fn()
+	s.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	if s.onAfterDo != nil {
+		s.onAfterDo(true)
+	}
+	return true, nil
+}
+
 func (s *stubOnlineUsersProvider) RemoveUserForProcess(core *xray.Process, _, _ string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if core == nil || core != s.currentProc {
 		return false, nil
 	}
@@ -397,6 +439,8 @@ func (s *stubOnlineUsersProvider) RemoveUserForProcess(core *xray.Process, _, _ 
 }
 
 func (s *stubOnlineUsersProvider) AddUserForProcess(core *xray.Process, _, _ string, _ map[string]any) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if core == nil || core != s.currentProc {
 		return false, nil
 	}
@@ -499,7 +543,7 @@ func TestCheckClientIpJobAbortsEnforcementAcrossXrayRestart(t *testing.T) {
 			}},
 		}
 		provider.onSample = func() {
-			provider.currentProc = gen2
+			provider.setCurrentProcess(gen2)
 		}
 
 		ipJob := &CheckClientIpJob{onlineSource: provider, disconnectWait: func() {}}
@@ -507,6 +551,40 @@ func TestCheckClientIpJobAbortsEnforcementAcrossXrayRestart(t *testing.T) {
 
 		if _, err := os.Stat(xray.GetIPLimitLogPath()); !os.IsNotExist(err) {
 			t.Fatalf("ban log created after Xray restart: stat err = %v", err)
+		}
+		if len(provider.removeCalls) != 0 || len(provider.addCalls) != 0 {
+			t.Fatalf("unexpected user mutations after restart: remove=%d add=%d", len(provider.removeCalls), len(provider.addCalls))
+		}
+		if len(ipJob.bannedSeen) != 0 {
+			t.Fatalf("aborted scan mutated bannedSeen: %+v", ipJob.bannedSeen)
+		}
+	})
+
+	t.Run("restart after tx commit before fail2ban log skips log and disconnect", func(t *testing.T) {
+		now := seedOverLimit(t, "vless-restart-prelog", "erin@example.test")
+		gen1 := xray.NewProcess(&xray.Config{})
+		gen2 := xray.NewProcess(&xray.Config{})
+		provider := &stubOnlineUsersProvider{
+			running:     true,
+			sampledProc: gen1,
+			currentProc: gen1,
+			fresh: []xray.OnlineUser{{
+				Email: "erin@example.test",
+				IPs: []xray.OnlineIP{
+					{IP: "1.1.1.1", LastSeen: now - 5},
+					{IP: "2.2.2.2", LastSeen: now},
+				},
+			}},
+		}
+		provider.onBeforeDo = func() {
+			provider.setCurrentProcess(gen2)
+		}
+
+		ipJob := &CheckClientIpJob{onlineSource: provider, disconnectWait: func() {}}
+		ipJob.Run()
+
+		if _, err := os.Stat(xray.GetIPLimitLogPath()); !os.IsNotExist(err) {
+			t.Fatalf("stale process wrote fail2ban log after restart: stat err = %v", err)
 		}
 		if len(provider.removeCalls) != 0 || len(provider.addCalls) != 0 {
 			t.Fatalf("unexpected user mutations after restart: remove=%d add=%d", len(provider.removeCalls), len(provider.addCalls))
@@ -532,9 +610,9 @@ func TestCheckClientIpJobAbortsEnforcementAcrossXrayRestart(t *testing.T) {
 				},
 			}},
 		}
-		provider.onCheck = func(call int) {
-			if call == 5 {
-				provider.currentProc = gen2
+		provider.onAfterDo = func(ran bool) {
+			if ran {
+				provider.setCurrentProcess(gen2)
 			}
 		}
 
@@ -570,7 +648,7 @@ func TestCheckClientIpJobAbortsEnforcementAcrossXrayRestart(t *testing.T) {
 		ipJob := &CheckClientIpJob{
 			onlineSource: provider,
 			disconnectWait: func() {
-				provider.currentProc = gen2
+				provider.setCurrentProcess(gen2)
 			},
 		}
 		ipJob.Run()
@@ -582,4 +660,131 @@ func TestCheckClientIpJobAbortsEnforcementAcrossXrayRestart(t *testing.T) {
 			t.Fatalf("addCalls = %v, want no restore on replacement process", provider.addCalls)
 		}
 	})
+}
+
+func statementTable(tx *gorm.DB) string {
+	if tx == nil || tx.Statement == nil {
+		return ""
+	}
+	if tx.Statement.Table != "" {
+		return tx.Statement.Table
+	}
+	if tx.Statement.Schema != nil {
+		return tx.Statement.Schema.Table
+	}
+	return ""
+}
+
+func TestCheckClientIpJobDoesNotWaitForRestartLockInsideTransaction(t *testing.T) {
+	setupIntegrationDB(t)
+	t.Setenv("XUI_ENABLE_FAIL2BAN", "true")
+	fakeFail2BanClient(t)
+	seedLinkedInboundWithClient(t, "vless-restart-lock-order", "dave@example.test", 1)
+
+	now := time.Now().Unix()
+	seedClientIps(t, "dave@example.test", []IPWithTimestamp{{IP: "1.1.1.1", Timestamp: now - 10}})
+
+	gen1 := xray.NewProcess(&xray.Config{})
+	gen2 := xray.NewProcess(&xray.Config{})
+	provider := &stubOnlineUsersProvider{
+		running:     true,
+		sampledProc: gen1,
+		currentProc: gen1,
+		fresh: []xray.OnlineUser{{
+			Email: "dave@example.test",
+			IPs: []xray.OnlineIP{
+				{IP: "1.1.1.1", LastSeen: now - 5},
+				{IP: "2.2.2.2", LastSeen: now},
+			},
+		}},
+	}
+
+	enteredTx := make(chan struct{})
+	restartHoldingLock := make(chan struct{})
+	stopRestart := make(chan struct{})
+	var enteredOnce sync.Once
+	var enteredTxFired atomic.Bool
+
+	if err := database.GetDB().Callback().Update().Before("gorm:update").Register("test:simulate_xray_restart_during_ip_tx", func(txDB *gorm.DB) {
+		if statementTable(txDB) != "inbound_client_ips" {
+			return
+		}
+		enteredOnce.Do(func() {
+			enteredTxFired.Store(true)
+			close(enteredTx)
+			select {
+			case <-restartHoldingLock:
+			case <-time.After(5 * time.Second):
+			}
+		})
+	}); err != nil {
+		t.Fatalf("register update callback: %v", err)
+	}
+
+	restartDone := make(chan struct{})
+	var restartWriteErr error
+	go func() {
+		defer close(restartDone)
+		select {
+		case <-enteredTx:
+		case <-stopRestart:
+			return
+		}
+		provider.mu.Lock()
+		close(restartHoldingLock)
+		restartWriteErr = database.GetDB().Create(&model.Setting{
+			Key:   "restartConcurrentWrite",
+			Value: "1",
+		}).Error
+		provider.currentProc = gen2
+		provider.mu.Unlock()
+	}()
+
+	ipJob := &CheckClientIpJob{onlineSource: provider, disconnectWait: func() {}}
+	start := time.Now()
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		ipJob.Run()
+	}()
+
+	select {
+	case <-runDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("CheckClientIpJob.Run stalled while concurrent Xray restart held restart lock")
+	}
+	if !enteredTxFired.Load() {
+		close(stopRestart)
+		<-restartDone
+		t.Fatal("expected inbound_client_ips update callback inside transaction to fire")
+	}
+	select {
+	case <-restartDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("concurrent Xray restart goroutine stalled on database write")
+	}
+
+	if elapsed := time.Since(start); elapsed >= 5*time.Second {
+		t.Fatalf("scan and restart waited %v, indicating lock-order contention", elapsed)
+	}
+	if restartWriteErr != nil {
+		t.Fatalf("concurrent restart DB write failed: %v", restartWriteErr)
+	}
+
+	var saved model.Setting
+	if err := database.GetDB().Where("key = ?", "restartConcurrentWrite").First(&saved).Error; err != nil {
+		t.Fatalf("load restartConcurrentWrite setting: %v", err)
+	}
+	if saved.Value != "1" {
+		t.Fatalf("restartConcurrentWrite value = %q, want %q", saved.Value, "1")
+	}
+	if _, err := os.Stat(xray.GetIPLimitLogPath()); !os.IsNotExist(err) {
+		t.Fatalf("stale process wrote fail2ban log after concurrent restart: stat err = %v", err)
+	}
+	if len(provider.removeCalls) != 0 || len(provider.addCalls) != 0 {
+		t.Fatalf("unexpected user mutations after concurrent restart: remove=%d add=%d", len(provider.removeCalls), len(provider.addCalls))
+	}
+	if len(ipJob.bannedSeen) != 0 {
+		t.Fatalf("aborted scan mutated bannedSeen: %+v", ipJob.bannedSeen)
+	}
 }

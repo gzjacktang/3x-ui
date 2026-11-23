@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	proxymanCommand "github.com/xtls/xray-core/app/proxyman/command"
 	statsService "github.com/xtls/xray-core/app/stats/command"
@@ -198,5 +200,98 @@ func TestXrayServiceUserMutationsRejectStaleProcessGeneration(t *testing.T) {
 	}
 	if got := handlerSrv.alterCalls.Load(); got != 2 {
 		t.Fatalf("stale process mutated replacement core: alterCalls = %d, want 2", got)
+	}
+}
+
+func TestXrayServiceDoForProcessHoldsRestartLockAtomically(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake core is a shell script")
+	}
+	setupConflictDB(t)
+	binFolder := t.TempDir()
+	t.Setenv("XUI_BIN_FOLDER", binFolder)
+	t.Setenv("XUI_LOG_FOLDER", t.TempDir())
+	binary := filepath.Join(binFolder, xray.GetBinaryName())
+	if err := os.WriteFile(binary, []byte(fakeXrayCore("26.10.31", true)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &xray.Config{}
+	initial := xray.NewProcess(cfg)
+	if err := initial.Start(); err != nil {
+		t.Fatalf("start initial fake core: %v", err)
+	}
+	replacement := xray.NewProcess(cfg)
+	if err := replacement.Start(); err != nil {
+		_ = initial.Stop()
+		t.Fatalf("start replacement fake core: %v", err)
+	}
+	previous := XrayProcess()
+	installTestXrayProcess(initial)
+	t.Cleanup(func() {
+		_ = initial.Stop()
+		_ = replacement.Stop()
+		installTestXrayProcess(previous)
+	})
+
+	svc := &XrayService{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var ranCount atomic.Int32
+	type doResult struct {
+		ran bool
+		err error
+	}
+	doDone := make(chan doResult, 1)
+	go func() {
+		ran, err := svc.DoForProcess(initial, func() error {
+			close(entered)
+			<-release
+			ranCount.Add(1)
+			return nil
+		})
+		doDone <- doResult{ran: ran, err: err}
+	}()
+
+	<-entered
+	swapped := make(chan struct{})
+	go func() {
+		installTestXrayProcess(replacement)
+		close(swapped)
+	}()
+
+	select {
+	case <-swapped:
+		t.Fatal("process swap acquired restart lock before DoForProcess callback returned")
+	case <-time.After(40 * time.Millisecond):
+	}
+
+	close(release)
+	got := <-doDone
+	<-swapped
+	if !got.ran || got.err != nil || ranCount.Load() != 1 {
+		t.Fatalf("DoForProcess(initial) = (%v, %v), ranCount=%d; want (true, nil), 1", got.ran, got.err, ranCount.Load())
+	}
+
+	var staleRan atomic.Int32
+	if ran, err := svc.DoForProcess(initial, func() error {
+		staleRan.Add(1)
+		return nil
+	}); ran || err != nil || staleRan.Load() != 0 {
+		t.Fatalf("DoForProcess(stale) = (%v, %v), staleRan=%d; want (false, nil), 0", ran, err, staleRan.Load())
+	}
+
+	sentinelErr := errors.New("write failed")
+	if ran, err := svc.DoForProcess(replacement, func() error {
+		return sentinelErr
+	}); ran || !errors.Is(err, sentinelErr) {
+		t.Fatalf("DoForProcess(error) = (%v, %v); want (false, %v)", ran, err, sentinelErr)
+	}
+
+	if ran, err := svc.DoForProcess(nil, func() error { return nil }); ran || err != nil {
+		t.Fatalf("DoForProcess(nil core) = (%v, %v); want (false, nil)", ran, err)
+	}
+	if ran, err := svc.DoForProcess(replacement, nil); ran || err != nil {
+		t.Fatalf("DoForProcess(nil fn) = (%v, %v); want (false, nil)", ran, err)
 	}
 }
