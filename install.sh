@@ -1567,6 +1567,9 @@ install_x-ui() {
 
     chmod +x x-ui bin/xray-linux-amd64
     if [[ -f bin/mtg-linux-amd64 ]]; then chmod +x bin/mtg-linux-amd64; fi
+    sha256sum bin/xray-linux-amd64 | awk '{print tolower($1) "  xray-linux-amd64"}' > bin/xray-bundled.sha256
+    chmod 644 bin/xray-bundled.sha256
+    rm -f -- bin/xray-manual.sha256
 
     # Update x-ui cli and se set permission
     mv -f "${xui_script_temp}" /usr/bin/x-ui

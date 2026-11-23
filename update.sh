@@ -236,6 +236,66 @@ config_after_update() {
 }
 
 # Download, verify and stage everything before stopping the running panel.
+_xray_version_of() {
+    local bin="$1"
+    [[ -x "$bin" && ! -L "$bin" ]] || return 1
+    "$bin" -version 2>/dev/null | awk 'NR == 1 && $1 == "Xray" && $2 ~ /^[0-9]+(\.[0-9]+)*$/ { print $2; exit }'
+}
+
+_version_gt() {
+    awk -v a="$1" -v b="$2" 'BEGIN {
+        na = split(a, va, ".")
+        nb = split(b, vb, ".")
+        n = (na > nb ? na : nb)
+        for (i = 1; i <= n; i++) {
+            ai = (i <= na ? va[i] + 0 : 0)
+            bi = (i <= nb ? vb[i] + 0 : 0)
+            if (ai > bi) exit 0
+            if (ai < bi) exit 1
+        }
+        exit 1
+    }'
+}
+
+_should_preserve_installed_xray() {
+    local installed="$1" candidate_bin="$2" bin_dir="$3"
+    local installed_sha manual_sha manual_ver bundled_sha installed_ver candidate_ver
+
+    if [[ "${XUI_FORCE_BUNDLED_XRAY:-0}" == "1" ]]; then
+        return 1
+    fi
+    if [[ ! -x "$installed" || -L "$installed" ]]; then
+        return 1
+    fi
+
+    installed_sha=$(sha256sum "$installed" | awk '{print $1}' | tr 'A-F' 'a-f')
+    if [[ -r "$bin_dir/xray-manual.sha256" ]]; then
+        manual_sha=$(awk 'NR == 1 {print $1}' "$bin_dir/xray-manual.sha256" | tr 'A-F' 'a-f')
+        manual_ver=$(awk 'NR == 1 {print $2}' "$bin_dir/xray-manual.sha256")
+        if [[ "$manual_sha" =~ ^[0-9a-f]{64}$ && "$manual_sha" == "$installed_sha" ]]; then
+            echo "Preserving manually installed Xray ${manual_ver:-binary} (set XUI_FORCE_BUNDLED_XRAY=1 to replace with bundled Xray)."
+            return 0
+        fi
+    fi
+
+    if [[ -r "$bin_dir/xray-bundled.sha256" ]]; then
+        bundled_sha=$(awk 'NR == 1 {print $1}' "$bin_dir/xray-bundled.sha256" | tr 'A-F' 'a-f')
+        if [[ "$bundled_sha" =~ ^[0-9a-f]{64}$ && "$bundled_sha" != "$installed_sha" ]]; then
+            echo "Preserving customized Xray binary (set XUI_FORCE_BUNDLED_XRAY=1 to replace with bundled Xray)."
+            return 0
+        fi
+    fi
+
+    installed_ver=$(_xray_version_of "$installed" || true)
+    candidate_ver=$(_xray_version_of "$candidate_bin" || true)
+    if [[ -n "$installed_ver" && -n "$candidate_ver" ]] && _version_gt "$installed_ver" "$candidate_ver"; then
+        echo "Preserving newer installed Xray ${installed_ver} over bundled ${candidate_ver} (set XUI_FORCE_BUNDLED_XRAY=1 to replace)."
+        return 0
+    fi
+
+    return 1
+}
+
 update_x-ui() {
     load_xui_env
     [[ "$xui_folder" == /* && "$xui_folder" != "/" && -x "$xui_folder/x-ui" ]] ||
@@ -280,6 +340,16 @@ update_x-ui() {
     chmod +x "$candidate/x-ui" "$candidate/x-ui.sh" "$candidate/bin/xray-linux-amd64"
     if [[ -f "$candidate/bin/mtg-linux-amd64" ]]; then chmod +x "$candidate/bin/mtg-linux-amd64"; fi
     [[ ! -e "$candidate/bin/config.json" ]] || _fail "The archive must not contain a runtime config.json."
+
+    local candidate_xray_sha preserved_xray=0
+    candidate_xray_sha=$(sha256sum "$candidate/bin/xray-linux-amd64" | awk '{print $1}' | tr 'A-F' 'a-f')
+    if _should_preserve_installed_xray "$xui_folder/bin/xray-linux-amd64" "$candidate/bin/xray-linux-amd64" "$xui_folder/bin"; then
+        rm -f -- "$candidate/bin/xray-linux-amd64"
+        preserved_xray=1
+    else
+        printf '%s  xray-linux-amd64\n' "$candidate_xray_sha" > "$candidate/bin/xray-bundled.sha256"
+        chmod 644 "$candidate/bin/xray-bundled.sha256"
+    fi
     chown -R root:root "$candidate" && chmod -R go-w "$candidate" || _fail "Cannot secure staged program files."
 
     echo "All update resources are verified; stopping x-ui."
@@ -291,6 +361,9 @@ update_x-ui() {
     # Copy the new program/resources without removing custom bin files, database
     # stores or certificate paths. The archive does not contain runtime config.json.
     cp -a "$candidate/." "$xui_folder/" || _fail "Cannot install the new program files."
+    if [[ "$preserved_xray" -eq 0 ]]; then
+        rm -f -- "$xui_folder/bin/xray-manual.sha256"
+    fi
     local cli_temp="/usr/bin/x-ui.tmp.$$"
     if ! cp "$candidate/x-ui.sh" "$cli_temp" || ! chmod 755 "$cli_temp" ||
         ! mv -f "$cli_temp" /usr/bin/x-ui; then

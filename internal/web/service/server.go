@@ -535,18 +535,18 @@ func (s *ServerService) UpdateXray(version string) error {
 
 	// Stage next to the target so the swap is an atomic rename on one filesystem, and
 	// keep the target's extension so Windows will run the staged file for the check.
-	stageZipFile := func(zipName string, fileName string) (string, error) {
+	stageZipFile := func(zipName string, fileName string) (string, string, error) {
 		zipFile, err := reader.Open(zipName)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		defer zipFile.Close()
 		if err := os.MkdirAll(filepath.Dir(fileName), 0o755); err != nil {
-			return "", err
+			return "", "", err
 		}
 		tmpFile, err := os.CreateTemp(filepath.Dir(fileName), ".xray-*"+filepath.Ext(fileName))
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		tmpPath := tmpFile.Name()
 		ok := false
@@ -556,25 +556,26 @@ func (s *ServerService) UpdateXray(version string) error {
 				_ = os.Remove(tmpPath)
 			}
 		}()
-		n, err := io.Copy(tmpFile, io.LimitReader(zipFile, maxXrayBinaryBytes+1))
+		hasher := sha256.New()
+		n, err := io.Copy(io.MultiWriter(tmpFile, hasher), io.LimitReader(zipFile, maxXrayBinaryBytes+1))
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if n > maxXrayBinaryBytes {
-			return "", fmt.Errorf("xray binary exceeds %d bytes", maxXrayBinaryBytes)
+			return "", "", fmt.Errorf("xray binary exceeds %d bytes", maxXrayBinaryBytes)
 		}
 		if err := tmpFile.Chmod(0o755); err != nil {
-			return "", err
+			return "", "", err
 		}
 		if err := tmpFile.Close(); err != nil {
-			return "", err
+			return "", "", err
 		}
 		ok = true
-		return tmpPath, nil
+		return tmpPath, hex.EncodeToString(hasher.Sum(nil)), nil
 	}
 
 	zipName, target := "xray", xray.GetBinaryPath()
-	staged, err := stageZipFile(zipName, target)
+	staged, installedSHA, err := stageZipFile(zipName, target)
 	if err != nil {
 		return err
 	}
@@ -591,12 +592,53 @@ func (s *ServerService) UpdateXray(version string) error {
 	if err := os.Rename(staged, target); err != nil {
 		return err
 	}
+	if err := recordManualXraySelection(filepath.Dir(target), installedSHA, version); err != nil {
+		logger.Warning("record manual xray selection failed:", err)
+	}
 
 	if err := s.xrayService.RestartXray(true); err != nil {
 		logger.Error("start xray failed:", err)
 		return fmt.Errorf("xray %s is installed, but the restart failed: %w", version, err)
 	}
 
+	return nil
+}
+
+const (
+	manualXrayMarkerFile  = "xray-manual.sha256"
+	bundledXrayMarkerFile = "xray-bundled.sha256"
+)
+
+func recordManualXraySelection(binDir, sha256Hex, version string) error {
+	markerPath := filepath.Join(binDir, manualXrayMarkerFile)
+	tmpFile, err := os.CreateTemp(binDir, ".xray-manual-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	ok := false
+	defer func() {
+		_ = tmpFile.Close()
+		if !ok {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := fmt.Fprintf(tmpFile, "%s  %s\n", strings.ToLower(sha256Hex), version); err != nil {
+		return err
+	}
+	if err := tmpFile.Chmod(0o644); err != nil {
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, markerPath); err != nil {
+		return err
+	}
+	ok = true
+	if err := os.Remove(filepath.Join(binDir, bundledXrayMarkerFile)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return nil
 }
 

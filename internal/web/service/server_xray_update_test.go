@@ -184,7 +184,65 @@ func TestUpdateXray(t *testing.T) {
 			if err != nil || len(leftovers) > 0 {
 				t.Fatalf("temp files left in the bin folder: %v (glob err %v)", leftovers, err)
 			}
+			markerPath := filepath.Join(binFolder, manualXrayMarkerFile)
+			if tc.wantErr != "" {
+				if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+					t.Fatalf("failed update wrote manual marker %s: stat err = %v", markerPath, err)
+				}
+			} else {
+				wantSum := sha256.Sum256([]byte(tc.wantBinary))
+				wantLine := fmt.Sprintf("%s  v%s\n", hex.EncodeToString(wantSum[:]), tc.wantVersion)
+				markerBytes, err := os.ReadFile(markerPath)
+				if err != nil {
+					t.Fatalf("read manual xray marker: %v", err)
+				}
+				if string(markerBytes) != wantLine {
+					t.Fatalf("manual xray marker = %q, want %q", string(markerBytes), wantLine)
+				}
+			}
 		})
+	}
+}
+
+func TestUpdateXrayAllowsManualDowngradeAndClearsBundledMarker(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake cores are shell scripts")
+	}
+	setupConflictDB(t)
+	binFolder := t.TempDir()
+	t.Setenv("XUI_BIN_FOLDER", binFolder)
+	t.Setenv("XUI_LOG_FOLDER", t.TempDir())
+
+	installed := fakeXrayCore("26.10.31", true)
+	downgraded := fakeXrayCore("26.7.28", true)
+	binary := filepath.Join(binFolder, xray.GetBinaryName())
+	if err := os.WriteFile(binary, []byte(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bundledMarker := filepath.Join(binFolder, bundledXrayMarkerFile)
+	if err := os.WriteFile(bundledMarker, []byte("deadbeef  xray-linux-amd64\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	startFakeCore(t)
+	xrayReleaseServer(t, "v26.7.28", xrayReleaseZip(t, downgraded))
+
+	if err := (&ServerService{}).UpdateXray("v26.7.28"); err != nil {
+		t.Fatalf("UpdateXray downgrade: %v", err)
+	}
+	if got := XrayProcess().GetXrayVersion(); got != "26.7.28" {
+		t.Fatalf("running core version = %q, want %q", got, "26.7.28")
+	}
+	if _, err := os.Stat(bundledMarker); !os.IsNotExist(err) {
+		t.Fatalf("bundled marker still exists after manual switch: stat err = %v", err)
+	}
+	wantSum := sha256.Sum256([]byte(downgraded))
+	wantLine := fmt.Sprintf("%s  v26.7.28\n", hex.EncodeToString(wantSum[:]))
+	gotMarker, err := os.ReadFile(filepath.Join(binFolder, manualXrayMarkerFile))
+	if err != nil {
+		t.Fatalf("read manual marker: %v", err)
+	}
+	if string(gotMarker) != wantLine {
+		t.Fatalf("manual marker = %q, want %q", string(gotMarker), wantLine)
 	}
 }
 
