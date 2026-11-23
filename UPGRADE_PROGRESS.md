@@ -103,3 +103,15 @@
 - 给 `ci.yml` 增加 `workflow_dispatch`，清理 6 个未使用的上游 Actions 工作流；补全配置日志测试的具体错误断言并同步 `CONTRIBUTING.md`。
 
 CI 验证：[Linux CI](https://github.com/gzjacktang/3x-ui/actions/runs/45101667822) 8 项全部通过（`go-test`、`race`、`golangci`、`govulncheck`、`postgres-durable-first`、`codegen`、`fuzz-smoke`、`frontend` 含 840 用例与 `npm audit`）。
+
+## 2026-11-23：v3.6.3 IP 限制受控重启竞态与旧安装升级兼容修复
+
+基线 `v3.6.2`（`d2c749f4`）。不修改数据库结构，不改变内置 Xray（`26.10.31`）和 Go（`1.27.4`）基线，也不恢复已移除的模块。
+
+- 将在线状态采样返回的 Xray 进程身份（`OnlineUsersSample.Process`）贯通到 IP 限制的封禁日志、临时断开与恢复操作（`IsCurrentProcess`、`DoForProcess`、`RemoveUserForProcess`、`AddUserForProcess`），修复面板受控重启期间旧采样误作用于新 Xray 进程的竞态。
+- 修正 IP 检查与 Xray 重启的锁顺序：移除 SQLite 写事务（`_txlock=immediate`）内对 Xray 重启锁的等待，消除与 `RestartXray -> GetXrayConfig -> AddTraffic` 并发时的锁序互等及 10 秒写锁超时风险，并补齐确定性并发回归测试。
+- 将 Fail2Ban `[LIMIT_IP]` 封禁日志写入与进程身份校验合并到事务提交后的同一次短重启锁临界区内（`DoForProcess`），避免检查与写日志之间发生受控重启留下未撤销的旧进程封禁记录。
+- 已知边界：换代导致跳过封禁时，已提交的 `inbound_client_ips` 观测记录不会回滚；若 Xray 在检查后自行崩溃退出，也不受面板重启锁控制。本补丁修复的是面板受控重启时的竞态窗口，不构成对所有网络/内核侧断线的兜底结论。
+- `update.sh` 新增 `XUI_KEEP_XRAY=1`（优先级低于 `XUI_FORCE_BUNDLED_XRAY=1`），供无标记文件的旧安装首次升级时保留此前手动降级过的 Xray 并补写 `bin/xray-manual.sha256`；同步清理贡献文档中已删除工作流的残留引用，收紧配置日志测试的精确错误断言。
+
+CI 验证：代码提交 `fc593f67` 的 [Linux CI](https://github.com/gzjacktang/3x-ui/actions/runs/45115106344) 8 项全绿；本发版提交将在打 `v3.6.3` 标签前再执行一轮完整 Linux CI。
