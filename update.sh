@@ -79,6 +79,16 @@ download_release() {
         --connect-timeout 15 --max-time 600 "$@"
 }
 
+# Resolve the newest stable tag from GitHub's /releases/latest redirect. The
+# rolling dev-latest pre-release is never reported as "latest" by GitHub.
+resolve_latest_stable_tag() {
+    local effective tag
+    effective=$(download_release -fsSLI -o /dev/null -w '%{url_effective}' "${xui_github}/releases/latest") || return 1
+    tag="${effective##*/releases/tag/}"
+    [[ "$tag" != "$effective" && "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    printf '%s\n' "$tag"
+}
+
 verify_release_archive() {
     local archive="$1" url="$2" expected actual
     if ! download_release -fLsS -o "${archive}.sha256" "${url}.sha256"; then
@@ -306,8 +316,12 @@ update_x-ui() {
     load_xui_env
     [[ "$xui_folder" == /* && "$xui_folder" != "/" && -x "$xui_folder/x-ui" ]] ||
         _fail "A valid installed XUI_MAIN_FOLDER is required."
-    local tag_version="${XUI_UPDATE_TAG:-dev-latest}" archive url candidate unit_name script_ref
+    local tag_version="${XUI_UPDATE_TAG:-}" archive url candidate unit_name script_ref
     [[ "$tag_version" != "dev" ]] || tag_version="dev-latest"
+    if [[ -z "$tag_version" || "$tag_version" == "latest" ]]; then
+        tag_version=$(resolve_latest_stable_tag) || _fail "Cannot resolve the latest stable release."
+        echo "Latest stable release: $tag_version"
+    fi
     [[ "$tag_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || _fail "Invalid release tag."
     xui_stage_dir=$(mktemp -d "${xui_folder%/*}/.x-ui-update.XXXXXX") ||
         _fail "Cannot create the update staging directory."

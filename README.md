@@ -21,22 +21,28 @@
 
 ## 快速开始
 
-当前仓库提供正式稳定版（最新：[`v3.6.3`](https://github.com/gzjacktang/3x-ui/releases/tag/v3.6.3)）与主分支滚动开发版（[`dev-latest`](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest)）Linux amd64 安装包，均附带 `.sha256` 校验文件；安装/更新在校验缺失或不匹配时中止。安装命令只从本仓库下载脚本和构建产物。
+当前仓库提供正式稳定版（[Releases](https://github.com/gzjacktang/3x-ui/releases/latest)）与主分支滚动开发版（[`dev-latest`](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest)）Linux amd64 安装包，均附带 `.sha256` 校验文件；安装/更新在校验缺失或不匹配时中止。安装命令只从本仓库下载脚本和构建产物。
 
 当前构建包使用 Go `1.27.4` 静态构建，内置 Xray-core `v26.10.31`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本（升级或降级均不受限）。
 
 面板自身的 TCP 监听已显式禁用 MPTCP，构建默认值及面板启动的 Xray/MTProto 子进程也默认禁用 MPTCP，以缓解 CVE-2026-98432 已公开的利用路径。用户通过高级配置显式启用的 Xray `tcpMptcp` 仍会覆盖默认值，请保持关闭。此措施不修复 Linux 内核中的底层漏洞，仍需安装发行版的内核安全更新并按要求重启。
 
-**一键安装 / 升级最新稳定版（推荐，`v3.6.3`）：**
-
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
-```
-
-**一键安装 / 升级滚动开发版（`dev-latest`，不传版本号时的默认行为）：**
+**一键安装 / 升级（默认自动获取最新正式稳定版）：**
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
+```
+
+**安装 / 升级到指定版本：**
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.4
+```
+
+**安装 / 升级滚动开发版（`dev-latest`，逐提交测试构建，不推荐日常使用）：**
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) dev
 ```
 
 > 已有安装再次运行上述命令会自动走非交互式暂存升级流程，不会覆盖数据库、证书路径或短访问路径。
@@ -63,11 +69,11 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 
 ### 开发版更新
 
-主分支构建由 [GitHub Actions 发布工作流](https://github.com/gzjacktang/3x-ui/actions/workflows/release.yml) 自动构建并更新。修改后需等待发布完成，再使用上方不带版本号的命令安装或升级滚动开发版；也可从 [Releases](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest) 查看当前构建版本。发布标签 `dev-latest` 仅为内部滚动标签，无需手动填写；该构建仍属于测试版，不等同于稳定版，日常使用建议优先安装带版本号的正式稳定版（如 `v3.6.3`）。
+主分支构建由 [GitHub Actions 发布工作流](https://github.com/gzjacktang/3x-ui/actions/workflows/release.yml) 自动发布到滚动标签 [`dev-latest`](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest)。该构建属于测试版，面板中显示为 `dev+<提交号>`，不等同于稳定版；只有显式传入 `dev`（或 `dev-latest`）或在 `x-ui` 菜单中选择 “Update to Dev Channel” 时才会安装。
 
 ### 已安装面板的升级
 
-已安装面板可在“面板设置 → 常规 → 面板更新”中检查并安装本仓库的最新构建；确认更新后，页面会显示执行状态并在成功后自动刷新。也可以重复执行上方安装命令升级。升级会先下载并校验 SHA-256、解包和检查资源，随后暂停 `x-ui` 服务并替换程序文件；数据库迁移成功后才重新启动。更新不申请或改动证书，不重建已有的短访问路径。默认配置下以下数据会保留：
+已安装面板可在“面板设置 → 常规 → 面板更新”中检查并安装本仓库的**最新正式稳定版**（`v3.6.4+` 面板起，网页更新默认走稳定版通道；正在运行 `dev+<提交号>` 开发版的面板也会提示切换到同版本或更新的稳定版）。确认更新后，页面会显示执行状态并在成功后自动刷新。也可以在服务器上运行 `x-ui update` 或重复执行上方安装命令升级。升级会先下载并校验 SHA-256、解包和检查资源，随后暂停 `x-ui` 服务并替换程序文件；数据库迁移成功后才重新启动。更新不申请或改动证书，不重建已有的短访问路径。默认配置下以下数据会保留：
 
 - `/etc/x-ui/x-ui.db` 中的入站、客户端、出站、路由、用户和面板设置。
 - 外部 PostgreSQL 数据库中的所有数据。
@@ -84,20 +90,23 @@ cp -a /etc/x-ui/x-ui.db "/etc/x-ui/x-ui.db.bak.$(date +%Y%m%d%H%M%S)"
 常用一键升级命令：
 
 ```bash
-# 升级到最新稳定版 v3.6.3
-bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
+# 升级到最新正式稳定版
+bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 
 # 旧安装曾手动降级过 Xray（无标记文件）：首次升级保留现有内核并补写标记
-XUI_KEEP_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
+XUI_KEEP_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 
 # 升级并强制恢复为安装包内置 Xray（v26.10.31）
-XUI_FORCE_BUNDLED_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
+XUI_FORCE_BUNDLED_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 ```
+
+> 早于 `v3.6.4` 的面板（包括显示为 `dev+<提交号>` 的开发版），网页“面板更新”仍固定检查 `dev-latest`。请先在服务器上执行一次上方升级命令切到正式稳定版，此后网页更新即默认走稳定版通道。
 
 升级包含一次旧会话密钥轮换，已有账号和密码不变，但需要重新登录。Freedom、DNS、WireGuard/WARP、XDNS 旧配置会按当前内核语义迁移。数据库迁移失败时更新会中止并保持服务停止，不会自动回滚数据库；请保留升级前备份。
 
-### 近期更新与选择性升级（至 `v3.6.3`）
+### 近期更新与选择性升级（至 `v3.6.4`）
 
+- 面板网页更新、`install.sh` / `update.sh` 与 `x-ui update` 默认改为追踪 GitHub 最新正式稳定版；滚动开发版需显式选择。
 - Go `1.27.4` 工具链、维护依赖和面板使用的 Xray 配置库与内置 `26.10.31` 对齐。
 - 登录并发限流、登录会话轮换、2FA TOTP 密钥校验与规范化（拒绝空密钥与非法 Base32）、反代 IP 和 WebSocket 来源校验；增加 Web 连接上限和共享静态压缩缓存。
 - SQLite 文件权限收紧；直接启动空库时也生成随机初始凭据，已有登录账号不重置。
@@ -112,13 +121,9 @@ XUI_FORCE_BUNDLED_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjac
 
 ### 无人值守安装
 
-适用于 cloud-init 的非交互式安装：
+适用于 cloud-init 的非交互式安装（默认最新正式稳定版）：
 
 ```bash
-# 安装最新稳定版 v3.6.3（推荐）
-XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
-
-# 安装滚动开发版（dev-latest）
 XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 ```
 

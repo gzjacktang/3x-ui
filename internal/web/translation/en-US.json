@@ -760,7 +760,7 @@
       "resetDefaultConfig": "Reset to Default",
       "panelSettings": "General",
       "panelUpdateTitle": "Panel update",
-      "panelUpdateDesc": "Check and install the latest panel build from this repository. The panel will briefly disconnect during the update; settings and database are preserved.",
+      "panelUpdateDesc": "Check and install the latest stable panel release from this repository. The panel will briefly disconnect during the update; settings and database are preserved.",
       "panelUpdateCurrent": "Current: {version}",
       "panelUpdateLatest": "Latest: {version}",
       "panelUpdateAvailable": "Update available",

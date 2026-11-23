@@ -115,3 +115,14 @@ CI 验证：[Linux CI](https://github.com/gzjacktang/3x-ui/actions/runs/45101667
 - `update.sh` 新增 `XUI_KEEP_XRAY=1`（优先级低于 `XUI_FORCE_BUNDLED_XRAY=1`），供无标记文件的旧安装首次升级时保留此前手动降级过的 Xray 并补写 `bin/xray-manual.sha256`；同步清理贡献文档中已删除工作流的残留引用，收紧配置日志测试的精确错误断言。
 
 CI 验证：代码提交 `fc593f67` 的 [Linux CI](https://github.com/gzjacktang/3x-ui/actions/runs/45115106344) 8 项全绿；本发版提交将在打 `v3.6.3` 标签前再执行一轮完整 Linux CI。
+
+## 2026-11-23：v3.6.4 默认追踪正式稳定版
+
+基线 `v3.6.3`（`226325f9`）。不修改数据库结构，不改变内置 Xray（`26.10.31`）和 Go（`1.27.4`）基线。
+
+- 面板“面板更新”不再固定检查和安装 `dev-latest`，改为默认对比 GitHub 最新正式稳定版并安装对应标签；运行 `dev+<提交号>` 开发版的面板会提示切换到同版本或更新的稳定版。
+- `install.sh` / `update.sh` / `x-ui update` 不传版本号时，通过 GitHub `releases/latest` 自动解析最新稳定标签（仅接受 `vX.Y.Z`）；显式传入 `dev` / `dev-latest` 或使用 “Update to Dev Channel” 仍可安装滚动开发版。
+- 早于 `v3.6.4` 的面板网页更新仍固定走 `dev-latest`，需在服务器上执行一次一键升级命令切到稳定版。
+- README 一键安装/升级命令改为默认稳定版，无需手动带版本号。
+
+CI 验证：发版提交在打 `v3.6.4` 标签前执行完整 Linux CI。

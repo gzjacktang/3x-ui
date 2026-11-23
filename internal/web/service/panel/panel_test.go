@@ -33,6 +33,46 @@ func TestIsNewerVersion(t *testing.T) {
 	}
 }
 
+func TestStableUpdateInfo(t *testing.T) {
+	cases := []struct {
+		name         string
+		latest       string
+		base         string
+		panelVersion string
+		devBuild     bool
+		want         PanelUpdateInfo
+	}{
+		{
+			name: "stable build behind latest", latest: "v3.6.4", base: "3.6.3", panelVersion: "3.6.3",
+			want: PanelUpdateInfo{Channel: "stable", CurrentVersion: "3.6.3", LatestVersion: "v3.6.4", UpdateAvailable: true},
+		},
+		{
+			name: "stable build on latest", latest: "v3.6.4", base: "3.6.4", panelVersion: "3.6.4",
+			want: PanelUpdateInfo{Channel: "stable", CurrentVersion: "3.6.4", LatestVersion: "v3.6.4", UpdateAvailable: false},
+		},
+		{
+			name: "dev build with older base", latest: "v3.6.4", base: "3.6.1", panelVersion: "dev+bb973a3e", devBuild: true,
+			want: PanelUpdateInfo{Channel: "stable", CurrentVersion: "dev+bb973a3e", LatestVersion: "v3.6.4", UpdateAvailable: true},
+		},
+		{
+			name: "dev build with same base cross-grades to stable", latest: "v3.6.4", base: "3.6.4", panelVersion: "dev+2c6e582f", devBuild: true,
+			want: PanelUpdateInfo{Channel: "stable", CurrentVersion: "dev+2c6e582f", LatestVersion: "v3.6.4", UpdateAvailable: true},
+		},
+		{
+			name: "dev build ahead of latest stays", latest: "v3.6.4", base: "3.6.5", panelVersion: "dev+0123abcd", devBuild: true,
+			want: PanelUpdateInfo{Channel: "stable", CurrentVersion: "dev+0123abcd", LatestVersion: "v3.6.4", UpdateAvailable: false},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := stableUpdateInfo(tc.latest, tc.base, tc.panelVersion, tc.devBuild)
+			if *got != tc.want {
+				t.Fatalf("stableUpdateInfo = %+v, want %+v", *got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPanelUpdateSourcesUseFork(t *testing.T) {
 	if want := "https://raw.githubusercontent.com/gzjacktang/3x-ui/main/update.sh"; panelUpdaterURL != want {
 		t.Fatalf("panelUpdaterURL = %q, want %q", panelUpdaterURL, want)

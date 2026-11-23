@@ -760,7 +760,7 @@
       "resetDefaultConfig": "重置为默认配置",
       "panelSettings": "常规",
       "panelUpdateTitle": "面板更新",
-      "panelUpdateDesc": "检查并安装本仓库的最新面板版本。更新期间面板会短暂断开，现有配置与数据库会保留。",
+      "panelUpdateDesc": "检查并安装本仓库的最新正式稳定版。更新期间面板会短暂断开，现有配置与数据库会保留。",
       "panelUpdateCurrent": "当前：{version}",
       "panelUpdateLatest": "最新：{version}",
       "panelUpdateAvailable": "有新版本",

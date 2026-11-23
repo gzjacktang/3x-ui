@@ -143,13 +143,28 @@ func (s *PanelService) GetUpdateInfoChannel(dev bool) (*PanelUpdateInfo, error) 
 	if err != nil {
 		return nil, err
 	}
-	current := config.GetBaseVersion()
+	return stableUpdateInfo(latest, config.GetBaseVersion(), config.GetPanelVersion(), config.IsDevBuild()), nil
+}
+
+/*
+stableUpdateInfo compares the running build with the latest stable tag. A rolling
+dev build may carry the same base version as a stable tag while being a different
+binary, so it is offered the stable release whenever that tag is not older than
+its base version, letting the panel move off the dev channel.
+*/
+func stableUpdateInfo(latest, baseVersion, panelVersion string, devBuild bool) *PanelUpdateInfo {
+	available := isNewerVersion(latest, baseVersion)
+	if devBuild && !available {
+		if cmp, ok := compareVersionStrings(latest, baseVersion); ok && cmp == 0 {
+			available = true
+		}
+	}
 	return &PanelUpdateInfo{
 		Channel:         "stable",
-		CurrentVersion:  current,
+		CurrentVersion:  panelVersion,
 		LatestVersion:   latest,
-		UpdateAvailable: isNewerVersion(latest, current),
-	}, nil
+		UpdateAvailable: available,
+	}
 }
 
 // devChannelActive reports whether self-update should track the rolling dev

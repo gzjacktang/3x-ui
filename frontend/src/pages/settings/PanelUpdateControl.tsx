@@ -35,7 +35,7 @@ export default function PanelUpdateControl() {
     setChecking(true);
     setError('');
     try {
-      const msg = await HttpUtil.get<UpdateInfo>('/panel/api/server/getPanelUpdateInfo', { dev: true }, { silent: true, timeout: 10000 });
+      const msg = await HttpUtil.get<UpdateInfo>('/panel/api/server/getPanelUpdateInfo', { dev: false }, { silent: true, timeout: 10000 });
       if (msg.success && msg.obj) setInfo(msg.obj);
       else {
         setInfo(null);
@@ -93,7 +93,7 @@ export default function PanelUpdateControl() {
         setError('');
         setResult('');
         try {
-          const msg = await HttpUtil.post<{ runId: string }>('/panel/api/server/updatePanel', { dev: true }, { silent: true });
+          const msg = await HttpUtil.post<{ runId: string }>('/panel/api/server/updatePanel', { dev: false }, { silent: true });
           if (!msg.success || !msg.obj?.runId) {
             setError(msg.msg || t('pages.settings.panelUpdateStartFailed'));
             return;

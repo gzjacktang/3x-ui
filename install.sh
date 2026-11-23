@@ -1433,6 +1433,16 @@ download_release() {
     curl --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 600 "$@"
 }
 
+# Resolve the newest stable tag from GitHub's /releases/latest redirect. The
+# rolling dev-latest pre-release is never reported as "latest" by GitHub.
+resolve_latest_stable_tag() {
+    local effective tag
+    effective=$(download_release -fsSLI -o /dev/null -w '%{url_effective}' "${xui_github}/releases/latest") || return 1
+    tag="${effective##*/releases/tag/}"
+    [[ "$tag" != "$effective" && "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    printf '%s\n' "$tag"
+}
+
 verify_release_archive() {
     local archive="$1" url="$2" expected actual
     if ! download_release -fLsS -o "${archive}.sha256" "${url}.sha256"; then
@@ -1463,60 +1473,53 @@ install_x-ui() {
             echo "Cannot download the updater; existing installation was left untouched." >&2
             exit 1
         fi
-        XUI_UPDATE_TAG="${1:-dev-latest}" bash "$updater"
+        XUI_UPDATE_TAG="${1:-}" bash "$updater"
         update_status=$?
         rm -f "$updater"
         return "$update_status"
     fi
     cd ${xui_folder%/x-ui}/
 
+    # Without an explicit version, install the newest stable release. Pass
+    # `dev` or `dev-latest` to opt into the rolling per-commit build.
+    local requested_tag="${1:-}"
+    if [[ -z "$requested_tag" || "$requested_tag" == "latest" ]]; then
+        requested_tag=$(resolve_latest_stable_tag) || {
+            echo -e "${red}Cannot resolve the latest stable release, please be sure that your server can access GitHub ${plain}"
+            exit 1
+        }
+        echo -e "Latest stable release: ${requested_tag}"
+    fi
+
     # Download resources
-    if [ $# == 0 ]; then
-        # This fork publishes main as a rolling pre-release instead of GitHub's
-        # stable "latest" release. Keep that implementation detail out of the
-        # normal installation command.
+    tag_version=$requested_tag
+    # The rolling dev channel ships under a fixed, non-semver tag that is
+    # force-moved to the latest main commit on every push. Accept `dev` as a
+    # convenient alias and skip the numeric floor check for it.
+    if [[ "$tag_version" == "dev" || "$tag_version" == "dev-latest" ]]; then
         tag_version="dev-latest"
-        echo -e "Installing the latest build from this repository..."
-        curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz "${xui_github}/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
-            exit 1
-        fi
-        if [[ ! -s ${xui_folder}-linux-$(arch).tar.gz ]]; then
-            rm ${xui_folder}-linux-$(arch).tar.gz -f
-            echo -e "${red}Downloaded x-ui release archive is empty${plain}"
-            exit 1
-        fi
+        echo -e "${yellow}Installing the rolling dev build (tag: dev-latest). This is a per-commit pre-release, not a stable version.${plain}"
     else
-        tag_version=$1
-        # The rolling dev channel ships under a fixed, non-semver tag that is
-        # force-moved to the latest main commit on every push. Accept `dev` as a
-        # convenient alias and skip the numeric floor check for it.
-        if [[ "$tag_version" == "dev" || "$tag_version" == "dev-latest" ]]; then
-            tag_version="dev-latest"
-            echo -e "${yellow}Installing the rolling dev build (tag: dev-latest). This is a per-commit pre-release, not a stable version.${plain}"
-        else
-            tag_version_numeric=${tag_version#v}
-            min_version="2.3.5"
+        tag_version_numeric=${tag_version#v}
+        min_version="2.3.5"
 
-            if [[ "$(printf '%s\n' "$min_version" "$tag_version_numeric" | sort -V | head -n1)" != "$min_version" ]]; then
-                echo -e "${red}Please use a newer version (at least v2.3.5). Exiting installation.${plain}"
-                exit 1
-            fi
-        fi
-
-        url="${xui_github}/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
-        echo -e "Beginning to install x-ui ${tag_version}"
-        curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz ${url}
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Download x-ui ${tag_version} failed, please check if the version exists ${plain}"
+        if [[ "$(printf '%s\n' "$min_version" "$tag_version_numeric" | sort -V | head -n1)" != "$min_version" ]]; then
+            echo -e "${red}Please use a newer version (at least v2.3.5). Exiting installation.${plain}"
             exit 1
         fi
-        if [[ ! -s ${xui_folder}-linux-$(arch).tar.gz ]]; then
-            rm ${xui_folder}-linux-$(arch).tar.gz -f
-            echo -e "${red}Downloaded x-ui release archive is empty${plain}"
-            exit 1
-        fi
+    fi
+
+    url="${xui_github}/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
+    echo -e "Beginning to install x-ui ${tag_version}"
+    curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz ${url}
+    if [[ $? -ne 0 ]]; then
+        echo -e "${red}Download x-ui ${tag_version} failed, please check if the version exists ${plain}"
+        exit 1
+    fi
+    if [[ ! -s ${xui_folder}-linux-$(arch).tar.gz ]]; then
+        rm ${xui_folder}-linux-$(arch).tar.gz -f
+        echo -e "${red}Downloaded x-ui release archive is empty${plain}"
+        exit 1
     fi
     local archive="${xui_folder}-linux-$(arch).tar.gz"
     local release_url="${xui_github}/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"

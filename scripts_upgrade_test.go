@@ -85,6 +85,41 @@ verify_release_archive "$TEST_ARCHIVE" https://example.invalid/panel.tar.gz
 	}
 }
 
+func TestResolveLatestStableTag(t *testing.T) {
+	for _, file := range []string{"install.sh", "update.sh"} {
+		for _, tc := range []struct {
+			name, effective, downloadFail, want string
+			ok                                  bool
+		}{
+			{"stable-tag", "https://github.com/gzjacktang/3x-ui/releases/tag/v3.6.4", "0", "v3.6.4", true},
+			{"no-stable-release", "https://github.com/gzjacktang/3x-ui/releases", "0", "", false},
+			{"dev-tag-rejected", "https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest", "0", "", false},
+			{"download-fails", "", "1", "", false},
+		} {
+			t.Run(file+"/"+tc.name, func(t *testing.T) {
+				source := upgradeScriptFunction(t, file, "resolve_latest_stable_tag") + `
+download_release() {
+    local last
+    for last in "$@"; do :; done
+    [[ "$last" == "https://github.com/gzjacktang/3x-ui/releases/latest" ]] || { echo "unexpected url $last" >&2; return 99; }
+    [[ "$DOWNLOAD_FAIL" != "1" ]] || return 22
+    printf '%s' "$TEST_EFFECTIVE"
+}
+xui_github=https://github.com/gzjacktang/3x-ui
+resolve_latest_stable_tag
+`
+				out, err := runUpgradeShell(t, source, "TEST_EFFECTIVE="+tc.effective, "DOWNLOAD_FAIL="+tc.downloadFail)
+				if (err == nil) != tc.ok {
+					t.Fatalf("success=%v, want %v: %s", err == nil, tc.ok, out)
+				}
+				if tc.ok && strings.TrimSpace(out) != tc.want {
+					t.Fatalf("resolve_latest_stable_tag = %q, want %q", strings.TrimSpace(out), tc.want)
+				}
+			})
+		}
+	}
+}
+
 func TestUpgradeArchitectureRejectsUnsupportedMachines(t *testing.T) {
 	for _, file := range []string{"install.sh", "update.sh"} {
 		for _, machine := range []string{"x86_64", "aarch64", "i686", "armv7l", "s390x"} {
