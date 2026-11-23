@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "**.go"
@@ -8,6 +9,7 @@ on:
       - "go.sum"
       - "frontend/**"
       - ".nvmrc"
+      - ".github/workflows/ci.yml"
   push:
     branches:
       - main
@@ -17,6 +19,7 @@ on:
       - "go.sum"
       - "frontend/**"
       - ".nvmrc"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
