@@ -1,10 +1,18 @@
-import i18next from 'i18next';
+import i18next, { type InterpolationOptions } from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
 import { LanguageManager } from '@/utils';
 import enUS from '../../../internal/web/translation/en-US.json';
 
 const FALLBACK = 'en-US';
+
+export const INTERPOLATION: InterpolationOptions = {
+  escapeValue: false,
+  prefix: '{',
+  suffix: '}',
+  nestingPrefix: '',
+  nestingPrefixEscaped: '(?!)',
+};
 
 const lazyModules = import.meta.glob([
   '../../../internal/web/translation/*.json',
@@ -25,7 +33,7 @@ export async function readyI18n() {
     lng: active,
     fallbackLng: FALLBACK,
     resources: { [FALLBACK]: { translation: enUS } },
-    interpolation: { escapeValue: false, prefix: '{', suffix: '}' },
+    interpolation: INTERPOLATION,
     returnNull: false,
   });
   if (active !== FALLBACK) {

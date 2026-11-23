@@ -370,10 +370,14 @@ export default function BasicsTab({
             paddings="small"
             control={
               <Select
-                value={(log.loglevel as string) || 'warning'}
+                value={((log.logLevel ?? log.loglevel) as string) || 'warning'}
                 style={{ width: '100%' }}
                 options={LOG_LEVELS.map((s) => ({ value: s, label: s }))}
-                onChange={(v) => mutate((tt) => { if (tt.log) tt.log.loglevel = v; })}
+                onChange={(v) => mutate((tt) => {
+                  if (!tt.log) return;
+                  delete tt.log.loglevel;
+                  tt.log.logLevel = v;
+                })}
               />
             }
           />
