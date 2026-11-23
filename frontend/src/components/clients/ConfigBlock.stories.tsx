@@ -40,7 +40,12 @@ export const Collapsed: Story = {
     await expect(canvas.queryByText(/vless:\/\/11112222/)).not.toBeInTheDocument();
     await userEvent.click(canvas.getByText('vless'));
     const configText = await canvas.findByText(/vless:\/\/11112222/);
-    await waitFor(() => expect(configText).toBeVisible());
+    await waitFor(() => {
+      expect(configText).toBeVisible();
+      for (let el: HTMLElement | null = configText; el; el = el.parentElement) {
+        expect(getComputedStyle(el).opacity).toBe('1');
+      }
+    });
     await expect(canvas.getByRole('button', { name: 'Copy' })).toBeVisible();
     await expect(canvas.getByRole('button', { name: 'Download' })).toBeVisible();
     await expect(canvas.getByRole('button', { name: 'QR Code' })).toBeVisible();
