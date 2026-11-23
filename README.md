@@ -21,17 +21,27 @@
 
 ## 快速开始
 
-当前仓库自动将主分支发布为最新 Linux amd64 构建，安装包附带 `.sha256` 校验文件；安装/更新在校验缺失或不匹配时中止。安装命令只从本仓库下载脚本和构建产物：
+当前仓库提供正式稳定版（最新：[`v3.6.3`](https://github.com/gzjacktang/3x-ui/releases/tag/v3.6.3)）与主分支滚动开发版（[`dev-latest`](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest)）Linux amd64 安装包，均附带 `.sha256` 校验文件；安装/更新在校验缺失或不匹配时中止。安装命令只从本仓库下载脚本和构建产物。
 
-当前构建包内置 Xray-core `v26.10.31`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本。
+当前构建包使用 Go `1.27.4` 静态构建，内置 Xray-core `v26.10.31`；已安装的面板也可在“Xray 配置”页面内按需切换其他官方版本（升级或降级均不受限）。
 
 面板自身的 TCP 监听已显式禁用 MPTCP，构建默认值及面板启动的 Xray/MTProto 子进程也默认禁用 MPTCP，以缓解 CVE-2026-98432 已公开的利用路径。用户通过高级配置显式启用的 Xray `tcpMptcp` 仍会覆盖默认值，请保持关闭。此措施不修复 Linux 内核中的底层漏洞，仍需安装发行版的内核安全更新并按要求重启。
+
+**一键安装 / 升级最新稳定版（推荐，`v3.6.3`）：**
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
+```
+
+**一键安装 / 升级滚动开发版（`dev-latest`，不传版本号时的默认行为）：**
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 ```
 
-安装完成后运行 `x-ui` 打开管理菜单。安装程序会生成随机登录凭据，并将结果写入 `/etc/x-ui/install-result.env`。
+> 已有安装再次运行上述命令会自动走非交互式暂存升级流程，不会覆盖数据库、证书路径或短访问路径。
+
+安装完成后运行 `x-ui` 打开管理菜单。全新安装会生成随机登录凭据，并将结果写入 `/etc/x-ui/install-result.env`。
 
 ### Xray 内核版本管理
 
@@ -53,7 +63,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 
 ### 开发版更新
 
-主分支构建由 [GitHub Actions 发布工作流](https://github.com/gzjacktang/3x-ui/actions/workflows/release.yml) 自动构建并更新。修改后需等待发布完成，再直接使用上方命令安装或升级最新版本；也可从 [Releases](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest) 查看当前构建版本。发布标签 `dev-latest` 仅为内部滚动标签，无需手动填写；该构建仍属于测试版，不等同于稳定版。
+主分支构建由 [GitHub Actions 发布工作流](https://github.com/gzjacktang/3x-ui/actions/workflows/release.yml) 自动构建并更新。修改后需等待发布完成，再使用上方不带版本号的命令安装或升级滚动开发版；也可从 [Releases](https://github.com/gzjacktang/3x-ui/releases/tag/dev-latest) 查看当前构建版本。发布标签 `dev-latest` 仅为内部滚动标签，无需手动填写；该构建仍属于测试版，不等同于稳定版，日常使用建议优先安装带版本号的正式稳定版（如 `v3.6.3`）。
 
 ### 已安装面板的升级
 
@@ -63,22 +73,37 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 - 外部 PostgreSQL 数据库中的所有数据。
 - 面板端口、访问路径、登录凭据和已配置的证书。
 
-已有安装通过暂存更新替换程序与内置资源，数据库、证书路径和自定义 `bin/` 文件会保留；升级到带标记的版本（`v3.6.2+`）后，通过面板“内核版本”手动切换（升级或降级）或自行替换过的 `bin/xray-linux-amd64` 在后续面板升级时会自动保留。对于尚无标记文件的旧安装，升级时默认仅自动保留高于包内版本的 Xray（若旧实例曾手动降级过 Xray，首次升级可传入 `XUI_KEEP_XRAY=1` 保留当前内核并补写标记；如需强制恢复为安装包内置版本，可传入 `XUI_FORCE_BUNDLED_XRAY=1`）。`geoip.dat` / `geosite.dat` 与其他内置程序默认随版本更新。升级前建议先备份 SQLite 数据库：
+已有安装通过暂存更新替换程序与内置资源，数据库、证书路径和自定义 `bin/` 文件会保留；升级到带标记的版本（`v3.6.2+`）后，通过面板“内核版本”手动切换（升级或降级）或自行替换过的 `bin/xray-linux-amd64` 在后续面板升级时会自动保留。对于尚无标记文件的旧安装，升级时默认仅自动保留高于包内版本的 Xray（若旧实例曾手动降级过 Xray，首次升级可传入 `XUI_KEEP_XRAY=1` 保留当前内核并补写标记；如需强制恢复为安装包内置版本，可传入 `XUI_FORCE_BUNDLED_XRAY=1`）。`geoip.dat` / `geosite.dat` 与其他内置程序默认随版本更新。
+
+升级前建议先备份 SQLite 数据库：
 
 ```bash
 cp -a /etc/x-ui/x-ui.db "/etc/x-ui/x-ui.db.bak.$(date +%Y%m%d%H%M%S)"
 ```
 
+常用一键升级命令：
+
+```bash
+# 升级到最新稳定版 v3.6.3
+bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
+
+# 旧安装曾手动降级过 Xray（无标记文件）：首次升级保留现有内核并补写标记
+XUI_KEEP_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
+
+# 升级并强制恢复为安装包内置 Xray（v26.10.31）
+XUI_FORCE_BUNDLED_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
+```
+
 升级包含一次旧会话密钥轮换，已有账号和密码不变，但需要重新登录。Freedom、DNS、WireGuard/WARP、XDNS 旧配置会按当前内核语义迁移。数据库迁移失败时更新会中止并保持服务停止，不会自动回滚数据库；请保留升级前备份。
 
-### 本轮选择性升级
+### 近期更新与选择性升级（至 `v3.6.3`）
 
-- Go 工具链、安全依赖和面板使用的 Xray 配置库与内置 `26.10.31` 对齐。
-- 登录并发限流、登录会话轮换、反代 IP 和 WebSocket 来源校验；增加 Web 连接上限和共享静态压缩缓存。
+- Go `1.27.4` 工具链、维护依赖和面板使用的 Xray 配置库与内置 `26.10.31` 对齐。
+- 登录并发限流、登录会话轮换、2FA TOTP 密钥校验与规范化（拒绝空密钥与非法 Base32）、反代 IP 和 WebSocket 来源校验；增加 Web 连接上限和共享静态压缩缓存。
 - SQLite 文件权限收紧；直接启动空库时也生成随机初始凭据，已有登录账号不重置。
-- ENC 与回落冲突在保存及配置生成前拒绝；补充出站密钥、证书文件和高开销配置校验。
-- 修复客户端续期、流量重置、手动停用保护、部分字段更新和 IP 临时限制恢复；完整保留核心崩溃原因。
-- 发布仅保留 Linux amd64，安装与升级严格核对 `.sha256`，所有面板更新入口继续使用本仓库。
+- ENC 与回落冲突在保存及配置生成前拒绝；补充出站密钥、证书文件和高开销配置校验；兼容前端 `log.logLevel` 大小写读写并禁用 `i18next` 嵌套解析。
+- 修复客户端续期、流量重置、手动停用保护、部分字段更新；客户端 IP 限制执法改用实时在线采样并绑定采样 Xray 进程代际，修正面板受控重启时的竞态窗口、SQLite 写事务与重启锁的锁序反转，以及 Fail2Ban 封禁日志原子写入；完整保留核心崩溃原因。
+- 发布仅保留 Linux amd64，安装与升级严格核对 `.sha256`；支持自动保留手动切换/替换的 Xray 内核（含 `XUI_KEEP_XRAY=1` / `XUI_FORCE_BUNDLED_XRAY=1` 开关），所有面板更新入口继续使用本仓库。
 - 新增 UFW 防火墙管控页：实时放行/删除端口、启停防火墙，并保护 SSH 与面板端口。
 
 未恢复系统监控、节点、主机、分组、订阅、通知服务或额外语言。普通 `geoip.dat` / `geosite.dat` 继续随构建更新，不下载 IR/RU 数据库。
@@ -90,6 +115,10 @@ cp -a /etc/x-ui/x-ui.db "/etc/x-ui/x-ui.db.bak.$(date +%Y%m%d%H%M%S)"
 适用于 cloud-init 的非交互式安装：
 
 ```bash
+# 安装最新稳定版 v3.6.3（推荐）
+XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh) v3.6.3
+
+# 安装滚动开发版（dev-latest）
 XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 ```
 
