@@ -16,8 +16,17 @@ type onlineStatsSnapshot struct {
 	validUntil time.Time
 }
 
-/* GetOnlineUsers returns a shared read-only snapshot of the core's online stats. */
+/* GetOnlineUsers returns a shared snapshot of the core's online stats for display callers. */
 func (p *Process) GetOnlineUsers() ([]OnlineUser, bool, error) {
+	return p.getOnlineUsers(true)
+}
+
+/* GetOnlineUsersFresh queries the core directly and refreshes the shared snapshot. */
+func (p *Process) GetOnlineUsersFresh() ([]OnlineUser, bool, error) {
+	return p.getOnlineUsers(false)
+}
+
+func (p *Process) getOnlineUsers(allowCache bool) ([]OnlineUser, bool, error) {
 	snapshot := &p.onlineStats
 	snapshot.mu.Lock()
 	defer snapshot.mu.Unlock()
@@ -25,8 +34,8 @@ func (p *Process) GetOnlineUsers() ([]OnlineUser, bool, error) {
 		return nil, false, nil
 	}
 	now := time.Now()
-	if now.Before(snapshot.validUntil) {
-		return snapshot.users, true, nil
+	if allowCache && now.Before(snapshot.validUntil) {
+		return cloneOnlineUsers(snapshot.users), true, nil
 	}
 	snapshot.users = nil
 	snapshot.validUntil = time.Time{}
@@ -54,5 +63,24 @@ func (p *Process) GetOnlineUsers() ([]OnlineUser, bool, error) {
 	}
 	snapshot.users = users
 	snapshot.validUntil = now.Add(onlineStatsMaxAge)
-	return users, true, nil
+	return cloneOnlineUsers(users), true, nil
+}
+
+func cloneOnlineUsers(users []OnlineUser) []OnlineUser {
+	if len(users) == 0 {
+		return nil
+	}
+	cloned := make([]OnlineUser, len(users))
+	for i, u := range users {
+		var ips []OnlineIP
+		if len(u.IPs) > 0 {
+			ips = make([]OnlineIP, len(u.IPs))
+			copy(ips, u.IPs)
+		}
+		cloned[i] = OnlineUser{
+			Email: u.Email,
+			IPs:   ips,
+		}
+	}
+	return cloned
 }

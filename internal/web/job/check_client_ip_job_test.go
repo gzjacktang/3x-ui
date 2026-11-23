@@ -10,6 +10,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
+	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
 
 func TestMergeClientIps_EvictsStaleOldEntries(t *testing.T) {
@@ -337,4 +338,86 @@ func fakeFail2BanClient(t *testing.T) string {
 	t.Setenv("FAIL2BAN_PROBE_MARKER", marker)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return marker
+}
+
+type stubOnlineUsersProvider struct {
+	running    bool
+	cached     []xray.OnlineUser
+	fresh      []xray.OnlineUser
+	cachedHits int
+	freshHits  int
+}
+
+func (s *stubOnlineUsersProvider) IsXrayRunning() bool {
+	return s.running
+}
+
+func (s *stubOnlineUsersProvider) GetOnlineUsers() ([]xray.OnlineUser, bool, error) {
+	s.cachedHits++
+	return s.cached, true, nil
+}
+
+func (s *stubOnlineUsersProvider) GetOnlineUsersFresh() ([]xray.OnlineUser, bool, error) {
+	s.freshHits++
+	return s.fresh, true, nil
+}
+
+func TestCheckClientIpJobRunUsesFreshSamplingForEnforcementAndCacheForCollection(t *testing.T) {
+	t.Run("enforcing limit uses fresh sampling instead of stale cache", func(t *testing.T) {
+		setupIntegrationDB(t)
+		t.Setenv("XUI_ENABLE_FAIL2BAN", "true")
+		fakeFail2BanClient(t)
+		seedLinkedInboundWithClient(t, "vless-fresh-enforce", "alice@example.test", 1)
+
+		now := time.Now().Unix()
+		seedClientIps(t, "alice@example.test", []IPWithTimestamp{{IP: "2.2.2.2", Timestamp: now - 10}})
+		provider := &stubOnlineUsersProvider{
+			running: true,
+			cached: []xray.OnlineUser{{
+				Email: "alice@example.test",
+				IPs: []xray.OnlineIP{
+					{IP: "1.1.1.1", LastSeen: now - 3},
+					{IP: "2.2.2.2", LastSeen: now - 1},
+				},
+			}},
+			fresh: []xray.OnlineUser{{
+				Email: "alice@example.test",
+				IPs: []xray.OnlineIP{
+					{IP: "2.2.2.2", LastSeen: now},
+				},
+			}},
+		}
+
+		ipJob := &CheckClientIpJob{onlineSource: provider}
+		ipJob.Run()
+
+		if provider.freshHits != 1 || provider.cachedHits != 0 {
+			t.Fatalf("enforcement hits fresh=%d cached=%d, want fresh=1 cached=0", provider.freshHits, provider.cachedHits)
+		}
+		if _, err := os.Stat(xray.GetIPLimitLogPath()); !os.IsNotExist(err) {
+			t.Fatalf("stale cached IP triggered a ban log: stat err = %v", err)
+		}
+	})
+
+	t.Run("collection without limit reuses cached snapshot", func(t *testing.T) {
+		setupIntegrationDB(t)
+		t.Setenv("XUI_ENABLE_FAIL2BAN", "true")
+		seedLinkedInboundWithClient(t, "vless-collect-only", "bob@example.test", 0)
+
+		now := time.Now().Unix()
+		provider := &stubOnlineUsersProvider{
+			running: true,
+			cached: []xray.OnlineUser{{
+				Email: "bob@example.test",
+				IPs:   []xray.OnlineIP{{IP: "3.3.3.3", LastSeen: now}},
+			}},
+		}
+
+		ipJob := &CheckClientIpJob{onlineSource: provider}
+		ipJob.Run()
+
+		if provider.cachedHits != 1 || provider.freshHits != 0 {
+			t.Fatalf("collection hits cached=%d fresh=%d, want cached=1 fresh=0", provider.cachedHits, provider.freshHits)
+		}
+	})
 }

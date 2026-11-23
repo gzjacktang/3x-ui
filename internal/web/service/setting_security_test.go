@@ -56,7 +56,7 @@ func TestUpdateAllSettingPreservesRedactedSecrets(t *testing.T) {
 	if err := s.saveSetting("twoFactorEnable", "true"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.saveSetting("twoFactorToken", "totp-secret"); err != nil {
+	if err := s.saveSetting("twoFactorToken", "JBSWY3DPEHPK3PXP"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,8 +71,50 @@ func TestUpdateAllSettingPreservesRedactedSecrets(t *testing.T) {
 	if got, _ := s.GetLdapPassword(); got != "ldap-secret" {
 		t.Fatalf("ldap password = %q, want preserved secret", got)
 	}
-	if got, _ := s.GetTwoFactorToken(); got != "totp-secret" {
+	if got, _ := s.GetTwoFactorToken(); got != "JBSWY3DPEHPK3PXP" {
 		t.Fatalf("2fa token = %q, want preserved secret", got)
+	}
+}
+
+func TestUpdateAllSettingTwoFactorSecret(t *testing.T) {
+	cases := []struct {
+		name      string
+		stored    string
+		submitted string
+		want      string
+		wantErr   string
+	}{
+		{name: "canonical", submitted: "JBSWY3DPEHPK3PXP", want: "JBSWY3DPEHPK3PXP"},
+		{name: "lower case and grouped", submitted: "jbsw y3dp ehpk 3pxp", want: "JBSWY3DPEHPK3PXP"},
+		{name: "redacted keeps stored", stored: "ORIGINALSECRET234567", submitted: "", want: "ORIGINALSECRET234567"},
+		{name: "not base32", stored: "ORIGINALSECRET234567", submitted: "totp-secret", want: "ORIGINALSECRET234567", wantErr: "two-factor secret must be a non-empty base32 key"},
+		{name: "nothing stored", submitted: "", want: "", wantErr: "two-factor secret must be a non-empty base32 key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setupSettingTestDB(t)
+			s := &SettingService{}
+			if err := s.SetTwoFactorToken(tc.stored); err != nil {
+				t.Fatal(err)
+			}
+			view, err := s.GetAllSettingView()
+			if err != nil {
+				t.Fatal(err)
+			}
+			settings := &view.AllSetting
+			settings.TwoFactorEnable = true
+			settings.TwoFactorToken = tc.submitted
+			err = s.UpdateAllSetting(settings, SecretClears{})
+			if tc.wantErr == "" && err != nil {
+				t.Fatalf("UpdateAllSetting error = %v, want nil", err)
+			}
+			if tc.wantErr != "" && (err == nil || err.Error() != tc.wantErr) {
+				t.Fatalf("UpdateAllSetting error = %v, want %q", err, tc.wantErr)
+			}
+			if got, _ := s.GetTwoFactorToken(); got != tc.want {
+				t.Fatalf("stored 2FA secret = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

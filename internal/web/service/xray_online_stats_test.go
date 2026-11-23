@@ -1,0 +1,97 @@
+package service
+
+import (
+	"context"
+	"net"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+
+	statsService "github.com/xtls/xray-core/app/stats/command"
+	"google.golang.org/grpc"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/xray"
+)
+
+type blockingOnlineStatsServer struct {
+	statsService.UnimplementedStatsServiceServer
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingOnlineStatsServer) GetUsersStats(context.Context, *statsService.GetUsersStatsRequest) (*statsService.GetUsersStatsResponse, error) {
+	close(s.entered)
+	<-s.release
+	return &statsService.GetUsersStatsResponse{
+		Users: []*statsService.UserStat{{Email: "alice"}},
+	}, nil
+}
+
+func TestXrayServiceGetOnlineUsersDiscardsStaleProcessGeneration(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake core is a shell script")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grpcServer := grpc.NewServer()
+	statsSrv := &blockingOnlineStatsServer{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	statsService.RegisterStatsServiceServer(grpcServer, statsSrv)
+	go func() { _ = grpcServer.Serve(listener) }()
+	t.Cleanup(grpcServer.Stop)
+
+	setupConflictDB(t)
+	binFolder := t.TempDir()
+	t.Setenv("XUI_BIN_FOLDER", binFolder)
+	t.Setenv("XUI_LOG_FOLDER", t.TempDir())
+	binary := filepath.Join(binFolder, xray.GetBinaryName())
+	if err := os.WriteFile(binary, []byte(fakeXrayCore("26.10.31", true)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	cfg := &xray.Config{
+		InboundConfigs: []xray.InboundConfig{{Tag: "api", Port: port}},
+	}
+	core := xray.NewProcess(cfg)
+	if err := core.Start(); err != nil {
+		t.Fatalf("start initial fake core: %v", err)
+	}
+	replacement := xray.NewProcess(cfg)
+	if err := replacement.Start(); err != nil {
+		_ = core.Stop()
+		t.Fatalf("start replacement fake core: %v", err)
+	}
+	previous := XrayProcess()
+	installTestXrayProcess(core)
+	t.Cleanup(func() {
+		_ = core.Stop()
+		_ = replacement.Stop()
+		installTestXrayProcess(previous)
+	})
+
+	type outcome struct {
+		users     []xray.OnlineUser
+		supported bool
+		err       error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		users, supported, callErr := (&XrayService{}).GetOnlineUsersFresh()
+		done <- outcome{users: users, supported: supported, err: callErr}
+	}()
+
+	<-statsSrv.entered
+	installTestXrayProcess(replacement)
+	close(statsSrv.release)
+
+	got := <-done
+	if got.err != nil || got.supported || len(got.users) != 0 {
+		t.Fatalf("stale generation returned users=%+v supported=%v err=%v; want discarded sample", got.users, got.supported, got.err)
+	}
+}

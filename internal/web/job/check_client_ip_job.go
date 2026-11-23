@@ -27,6 +27,12 @@ type IPWithTimestamp struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+type onlineUsersProvider interface {
+	IsXrayRunning() bool
+	GetOnlineUsers() ([]xray.OnlineUser, bool, error)
+	GetOnlineUsersFresh() ([]xray.OnlineUser, bool, error)
+}
+
 // CheckClientIpJob monitors client IP addresses and manages IP blocking based
 // on configured limits. The per-client IPs come from the core's online-stats
 // API; no access log is involved. On a core too old to expose that API the job
@@ -35,6 +41,14 @@ type CheckClientIpJob struct {
 	disAllowedIps []string
 	bannedSeen    map[string]int64
 	xrayService   service.XrayService
+	onlineSource  onlineUsersProvider
+}
+
+func (j *CheckClientIpJob) onlineProvider() onlineUsersProvider {
+	if j.onlineSource != nil {
+		return j.onlineSource
+	}
+	return &j.xrayService
 }
 
 var job *CheckClientIpJob
@@ -50,15 +64,7 @@ func NewCheckClientIpJob() *CheckClientIpJob {
 }
 
 func (j *CheckClientIpJob) Run() {
-	if !isFail2BanEnabled() {
-		return
-	}
-
-	observed, apiMode := j.collectFromOnlineAPI()
-	if !apiMode {
-		// xray is down or predates the online-stats API. There is no access-log
-		// fallback anymore, so there is nothing to do this run.
-		logger.Debug("[LimitIP] online-stats API unavailable this run; skipping")
+	if !isFail2BanEnabled() || !j.onlineProvider().IsXrayRunning() {
 		return
 	}
 
@@ -67,7 +73,15 @@ func (j *CheckClientIpJob) Run() {
 	if hasLimit {
 		f2bInstalled = j.checkFail2BanInstalled()
 	}
-	j.processObserved(observed, j.resolveEnforce(hasLimit, f2bInstalled), true)
+	enforce := j.resolveEnforce(hasLimit, f2bInstalled)
+
+	observed, apiMode := j.collectFromOnlineAPI(enforce)
+	if !apiMode {
+		logger.Debug("[LimitIP] online-stats API unavailable this run; skipping")
+		return
+	}
+
+	j.processObserved(observed, enforce, true)
 }
 
 // resolveEnforce decides whether limits can actually be enforced this run.
@@ -85,8 +99,18 @@ func (j *CheckClientIpJob) resolveEnforce(hasLimit, f2bInstalled bool) bool {
 // last-seen unix seconds) from the core's online-stats API. ok=false means the
 // API is unavailable — xray not running, an older core, or a transient gRPC
 // failure — and the caller skips the run (there is no access-log fallback).
-func (j *CheckClientIpJob) collectFromOnlineAPI() (map[string]map[string]int64, bool) {
-	onlineUsers, ok, err := j.xrayService.GetOnlineUsers()
+func (j *CheckClientIpJob) collectFromOnlineAPI(fresh bool) (map[string]map[string]int64, bool) {
+	provider := j.onlineProvider()
+	var (
+		onlineUsers []xray.OnlineUser
+		ok          bool
+		err         error
+	)
+	if fresh {
+		onlineUsers, ok, err = provider.GetOnlineUsersFresh()
+	} else {
+		onlineUsers, ok, err = provider.GetOnlineUsers()
+	}
 	if err != nil {
 		logger.Debug("[LimitIP] online-stats API unavailable this run:", err)
 		return nil, false

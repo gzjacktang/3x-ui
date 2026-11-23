@@ -715,13 +715,40 @@ func (s *XrayService) GetXrayTraffic() ([]*xray.Traffic, []*xray.ClientTraffic, 
 }
 
 func (s *XrayService) GetOnlineUsers() ([]xray.OnlineUser, bool, error) {
+	return s.getOnlineUsers(false)
+}
+
+func (s *XrayService) GetOnlineUsersFresh() ([]xray.OnlineUser, bool, error) {
+	return s.getOnlineUsers(true)
+}
+
+func (s *XrayService) getOnlineUsers(fresh bool) ([]xray.OnlineUser, bool, error) {
 	lock.Lock()
 	core := p
 	lock.Unlock()
 	if core == nil {
 		return nil, false, nil
 	}
-	return core.GetOnlineUsers()
+	var (
+		users     []xray.OnlineUser
+		supported bool
+		err       error
+	)
+	if fresh {
+		users, supported, err = core.GetOnlineUsersFresh()
+	} else {
+		users, supported, err = core.GetOnlineUsers()
+	}
+	if err != nil || !supported {
+		return users, supported, err
+	}
+	lock.Lock()
+	current := p == core
+	lock.Unlock()
+	if !current {
+		return nil, false, nil
+	}
+	return users, true, nil
 }
 
 // BalancerStatus is the live view of one balancer for the panel UI. Running
