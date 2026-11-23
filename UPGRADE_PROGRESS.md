@@ -97,7 +97,7 @@
 
 - 修复 `v3.6.1` 在线状态缓存与客户端 IP 限制执法的误判窗口：展示任务继续复用 4 秒快照并克隆返回切片；启用 IP 限制执法时改用实时 gRPC 查询并核验当前 Xray 进程代际，避免已下线 IP 触发瞬断。
 - 移植上游 2FA TOTP 密钥校验与规范化（`7367ff75` / #7113）：接受空格、小写和 `=` 填充形式，拒绝空密钥或非法 Base32，避免登录/关闭 2FA panic 或空密钥绕过。
-- 面板手动切换 Xray（升级或降级）时记录 `bin/xray-manual.sha256`，全新安装与内置更新记录 `bin/xray-bundled.sha256`；`update.sh` 升级面板时自动保留手动选择/自行替换/更新版本的 `bin/xray-linux-amd64`（传入 `XUI_FORCE_BUNDLED_XRAY=1` 可恢复内置内核），面板内升降级不受限。`geoip.dat` / `geosite.dat` 保持默认随包更新。
+- 面板手动切换 Xray（升级或降级）时记录 `bin/xray-manual.sha256`，全新安装与内置更新记录 `bin/xray-bundled.sha256`；在已有匹配标记后，`update.sh` 升级面板时自动保留手动选择（含升降级）或自行替换的 `bin/xray-linux-amd64`。无标记文件的旧安装首次升级时仅自动保留高于包内版本的 Xray（若旧实例曾手动降级过，可传 `XUI_KEEP_XRAY=1` 保留并补写标记；传入 `XUI_FORCE_BUNDLED_XRAY=1` 可恢复内置内核）。面板内升降级不受限，`geoip.dat` / `geosite.dat` 保持默认随包更新。
 - 移植前端 `log.logLevel` 大小写读写兼容（`bfe826c1`），禁用 `i18next` `$t(...)` 嵌套解析，并修复 `ConfigBlock` Storybook 折叠动画期间 axe 对比度偶发抖动。
 - 升级 10 项独立 Go 维护依赖（`gin-contrib/gzip`、`sessions`、`klauspost/compress v1.20.4`、`go-sqlite3 v1.14.53`、`gopsutil/v4 v4.26.10`、`fasthttp v1.78.0`、`x/crypto v0.59.0`、`x/sync`、`x/sys`、`x/text`）；继续保留 Go `1.27.4`、`godebug multipathtcp=0` 以及内置 Xray `26.10.31`（等包含 `#7375`、`#7359`、`#7431` 的下一正式版后统一同步）。
 - 给 `ci.yml` 增加 `workflow_dispatch`，清理 6 个未使用的上游 Actions 工作流；补全配置日志测试的具体错误断言并同步 `CONTRIBUTING.md`。

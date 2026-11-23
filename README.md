@@ -63,7 +63,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.
 - 外部 PostgreSQL 数据库中的所有数据。
 - 面板端口、访问路径、登录凭据和已配置的证书。
 
-已有安装通过暂存更新替换程序与内置资源，数据库、证书路径和自定义 `bin/` 文件会保留；通过面板“内核版本”手动切换过（升级或降级）或自行替换过的 `bin/xray-linux-amd64` 在面板升级时会自动保留（如需恢复为安装包内置版本，可升级时传入 `XUI_FORCE_BUNDLED_XRAY=1`），`geoip.dat` / `geosite.dat` 与其他内置程序默认随版本更新。升级前建议先备份 SQLite 数据库：
+已有安装通过暂存更新替换程序与内置资源，数据库、证书路径和自定义 `bin/` 文件会保留；升级到带标记的版本（`v3.6.2+`）后，通过面板“内核版本”手动切换（升级或降级）或自行替换过的 `bin/xray-linux-amd64` 在后续面板升级时会自动保留。对于尚无标记文件的旧安装，升级时默认仅自动保留高于包内版本的 Xray（若旧实例曾手动降级过 Xray，首次升级可传入 `XUI_KEEP_XRAY=1` 保留当前内核并补写标记；如需强制恢复为安装包内置版本，可传入 `XUI_FORCE_BUNDLED_XRAY=1`）。`geoip.dat` / `geosite.dat` 与其他内置程序默认随版本更新。升级前建议先备份 SQLite 数据库：
 
 ```bash
 cp -a /etc/x-ui/x-ui.db "/etc/x-ui/x-ui.db.bak.$(date +%Y%m%d%H%M%S)"

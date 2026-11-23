@@ -268,6 +268,12 @@ _should_preserve_installed_xray() {
         return 1
     fi
 
+    if [[ "${XUI_KEEP_XRAY:-0}" == "1" ]]; then
+        installed_ver=$(_xray_version_of "$installed" || true)
+        echo "Preserving installed Xray ${installed_ver:-binary} as requested by XUI_KEEP_XRAY=1."
+        return 0
+    fi
+
     installed_sha=$(sha256sum "$installed" | awk '{print $1}' | tr 'A-F' 'a-f')
     if [[ -r "$bin_dir/xray-manual.sha256" ]]; then
         manual_sha=$(awk 'NR == 1 {print $1}' "$bin_dir/xray-manual.sha256" | tr 'A-F' 'a-f')
@@ -341,11 +347,18 @@ update_x-ui() {
     if [[ -f "$candidate/bin/mtg-linux-amd64" ]]; then chmod +x "$candidate/bin/mtg-linux-amd64"; fi
     [[ ! -e "$candidate/bin/config.json" ]] || _fail "The archive must not contain a runtime config.json."
 
-    local candidate_xray_sha preserved_xray=0
+    local candidate_xray_sha preserved_xray=0 kept_by_env=0 installed_xray_sha installed_xray_ver
     candidate_xray_sha=$(sha256sum "$candidate/bin/xray-linux-amd64" | awk '{print $1}' | tr 'A-F' 'a-f')
     if _should_preserve_installed_xray "$xui_folder/bin/xray-linux-amd64" "$candidate/bin/xray-linux-amd64" "$xui_folder/bin"; then
         rm -f -- "$candidate/bin/xray-linux-amd64"
         preserved_xray=1
+        if [[ "${XUI_KEEP_XRAY:-0}" == "1" ]]; then
+            installed_xray_sha=$(sha256sum "$xui_folder/bin/xray-linux-amd64" | awk '{print $1}' | tr 'A-F' 'a-f')
+            installed_xray_ver=$(_xray_version_of "$xui_folder/bin/xray-linux-amd64" || true)
+            printf '%s  %s\n' "$installed_xray_sha" "${installed_xray_ver:+v$installed_xray_ver}" > "$candidate/bin/xray-manual.sha256"
+            chmod 644 "$candidate/bin/xray-manual.sha256"
+            kept_by_env=1
+        fi
     else
         printf '%s  xray-linux-amd64\n' "$candidate_xray_sha" > "$candidate/bin/xray-bundled.sha256"
         chmod 644 "$candidate/bin/xray-bundled.sha256"
@@ -363,6 +376,8 @@ update_x-ui() {
     cp -a "$candidate/." "$xui_folder/" || _fail "Cannot install the new program files."
     if [[ "$preserved_xray" -eq 0 ]]; then
         rm -f -- "$xui_folder/bin/xray-manual.sha256"
+    elif [[ "$kept_by_env" -eq 1 ]]; then
+        rm -f -- "$xui_folder/bin/xray-bundled.sha256"
     fi
     local cli_temp="/usr/bin/x-ui.tmp.$$"
     if ! cp "$candidate/x-ui.sh" "$cli_temp" || ! chmod 755 "$cli_temp" ||
