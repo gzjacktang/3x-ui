@@ -127,12 +127,13 @@ CI 验证：代码提交 `fc593f67` 的 [Linux CI](https://github.com/gzjacktang
 
 CI 验证：发版提交在打 `v3.6.4` 标签前执行完整 Linux CI。
 
-## 2026-11-24：v3.6.5 降低升级时的瞬时负载
+## 2026-11-24：v3.6.5 降低升级时的瞬时负载与安全依赖修复
 
-基线 `v3.6.4`（`6b4421de`）。不修改数据库结构和面板运行逻辑，只调整升级脚本。
+基线 `v3.6.4`（`6b4421de`）。不修改数据库结构和面板业务逻辑，调整升级脚本并修复新披露依赖告警。
 
 - `update.sh` 在 `curl`、`tar`、`socat`、`openssl`、`crontab` 和时区数据都已存在时，跳过 `apt-get update/install`（或其他发行版的同类操作），避免每次升级都刷新软件源，也减少与 `unattended-upgrades` 争用 dpkg 锁。需要强制刷新依赖时可传入 `XUI_FORCE_DEPS=1`。
 - `x-ui setup-fail2ban`（升级时自动执行）会在重写前后比对 fail2ban 相关配置文件。配置未变且 `3x-ipl` jail 已加载时，不再重启 fail2ban，避免每次升级都触发一次完整的日志重扫；配置有变或 jail 未加载时照常重启。
+- 升级 `github.com/gorilla/websocket` 至 `v1.5.4-0.20240701034025-d67f41855da4`，修复 `govulncheck` 新检出的 [`GO-2026-6278`](https://pkg.go.dev/vuln/GO-2026-6278)。
 - 背景：用户反馈部分小内存 VPS 升级后最初一段时间 CPU 偏高、重启后恢复。实测重启后 `x-ui`、`xray`、`fail2ban-server` 三小时多累计仅用去二三十秒 CPU，面板本身无持续占用；冲高与首次安装 fail2ban 的初始日志扫描及同期内核升级重合。
 
 CI 验证：发版提交在打 `v3.6.5` 标签前执行完整 Linux CI。
