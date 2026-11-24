@@ -100,12 +100,15 @@ XUI_KEEP_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-
 XUI_FORCE_BUNDLED_XRAY=1 bash <(curl -Ls https://raw.githubusercontent.com/gzjacktang/3x-ui/main/install.sh)
 ```
 
+升级时如果依赖软件包都已安装，脚本会跳过软件源刷新；fail2ban 配置没有变化时也不会重启 fail2ban，以降低小内存 VPS 升级时的瞬时负载。需要强制重新安装依赖时，在命令前加 `XUI_FORCE_DEPS=1`。
+
 > 早于 `v3.6.4` 的面板（包括显示为 `dev+<提交号>` 的开发版），网页“面板更新”仍固定检查 `dev-latest`。请先在服务器上执行一次上方升级命令切到正式稳定版，此后网页更新即默认走稳定版通道。
 
 升级包含一次旧会话密钥轮换，已有账号和密码不变，但需要重新登录。Freedom、DNS、WireGuard/WARP、XDNS 旧配置会按当前内核语义迁移。数据库迁移失败时更新会中止并保持服务停止，不会自动回滚数据库；请保留升级前备份。
 
-### 近期更新与选择性升级（至 `v3.6.4`）
+### 近期更新与选择性升级（至 `v3.6.5`）
 
+- 升级脚本在依赖齐全时跳过软件源刷新，fail2ban 配置未变时不再重启，降低升级时的 CPU 冲高。
 - 面板网页更新、`install.sh` / `update.sh` 与 `x-ui update` 默认改为追踪 GitHub 最新正式稳定版；滚动开发版需显式选择。
 - Go `1.27.4` 工具链、维护依赖和面板使用的 Xray 配置库与内置 `26.10.31` 对齐。
 - 登录并发限流、登录会话轮换、2FA TOTP 密钥校验与规范化（拒绝空密钥与非法 Base32）、反代 IP 和 WebSocket 来源校验；增加 Web 连接上限和共享静态压缩缓存。

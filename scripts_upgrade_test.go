@@ -120,6 +120,94 @@ resolve_latest_stable_tag
 	}
 }
 
+func TestBaseDepsPresentSkipsPackageRefresh(t *testing.T) {
+	if _, err := os.Stat("/usr/share/zoneinfo"); err != nil {
+		t.Skip("host has no /usr/share/zoneinfo")
+	}
+	all := []string{"curl", "tar", "socat", "openssl", "crontab"}
+	for _, tc := range []struct {
+		name    string
+		missing string
+		ok      bool
+	}{
+		{"all-present", "", true},
+		{"missing-socat", "socat", false},
+		{"missing-crontab", "crontab", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := t.TempDir()
+			for _, cmd := range all {
+				if cmd == tc.missing {
+					continue
+				}
+				if err := os.WriteFile(filepath.Join(bin, cmd), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			source := upgradeScriptFunction(t, "update.sh", "base_deps_present") + "\nbase_deps_present\n"
+			out, err := runUpgradeShell(t, source, "PATH="+bin)
+			if (err == nil) != tc.ok {
+				t.Fatalf("base_deps_present success=%v, want %v: %s", err == nil, tc.ok, out)
+			}
+		})
+	}
+}
+
+func TestFail2banRestartOnlyWhenNeeded(t *testing.T) {
+	fn := upgradeScriptFunction(t, "x-ui.sh", "fail2ban_restart_needed")
+	for _, tc := range []struct {
+		name, before, after, jailLoaded string
+		restart                         bool
+	}{
+		{"config-changed", "1 10", "2 10", "1", true},
+		{"unchanged-jail-loaded", "1 10", "1 10", "1", false},
+		{"unchanged-jail-missing", "1 10", "1 10", "0", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := fn + `
+fail2ban-client() { [[ "$1 $2" == "status 3x-ipl" && "$JAIL_LOADED" == "1" ]]; }
+fail2ban_restart_needed "$BEFORE" "$AFTER"
+`
+			out, err := runUpgradeShell(t, source, "BEFORE="+tc.before, "AFTER="+tc.after, "JAIL_LOADED="+tc.jailLoaded)
+			if (err == nil) != tc.restart {
+				t.Fatalf("fail2ban_restart_needed=%v, want %v: %s", err == nil, tc.restart, out)
+			}
+		})
+	}
+}
+
+func TestFail2banConfigFingerprintTracksIplimitFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, sub := range []string{"jail.d", "filter.d", "action.d"} {
+		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	jail := filepath.Join(root, "jail.d", "3x-ipl.conf")
+	if err := os.WriteFile(jail, []byte("[3x-ipl]\nbantime=30m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := strings.ReplaceAll(upgradeScriptFunction(t, "x-ui.sh", "fail2ban_iplimit_config_fingerprint"), "/etc/fail2ban", root) + "\nfail2ban_iplimit_config_fingerprint\n"
+	fingerprint := func() string {
+		t.Helper()
+		out, err := runUpgradeShell(t, source)
+		if err != nil {
+			t.Fatalf("fingerprint failed: %s (%v)", out, err)
+		}
+		return strings.TrimSpace(out)
+	}
+	first := fingerprint()
+	if second := fingerprint(); second != first {
+		t.Fatalf("unchanged config fingerprint changed: %q -> %q", first, second)
+	}
+	if err := os.WriteFile(jail, []byte("[3x-ipl]\nbantime=60m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if edited := fingerprint(); edited == first {
+		t.Fatalf("edited jail kept fingerprint %q", edited)
+	}
+}
+
 func TestUpgradeArchitectureRejectsUnsupportedMachines(t *testing.T) {
 	for _, file := range []string{"install.sh", "update.sh"} {
 		for _, machine := range []string{"x86_64", "aarch64", "i686", "armv7l", "s390x"} {

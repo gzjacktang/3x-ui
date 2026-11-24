@@ -2196,6 +2196,12 @@ setup_fail2ban_iplimit() {
 
     echo -e "${green}Configuring IP Limit...${plain}\n"
 
+    # Fingerprint the fail2ban configuration this function may rewrite, so a
+    # routine panel update that changes nothing does not restart fail2ban and
+    # make it rescan its logs.
+    local f2b_config_before f2b_config_after
+    f2b_config_before=$(fail2ban_iplimit_config_fingerprint)
+
     # make sure there's no conflict for jail files
     iplimit_remove_conflicts
 
@@ -2213,25 +2219,55 @@ setup_fail2ban_iplimit() {
     # we didn't pass the bantime here to use the default value
     create_iplimit_jails
 
+    f2b_config_after=$(fail2ban_iplimit_config_fingerprint)
+
     # Launching fail2ban
     if [[ $release == "alpine" ]]; then
         if [[ $(rc-service fail2ban status | grep -F 'status: started' -c) == 0 ]]; then
             rc-service fail2ban start
-        else
+        elif fail2ban_restart_needed "$f2b_config_before" "$f2b_config_after"; then
             rc-service fail2ban restart
+        else
+            echo -e "${green}Fail2ban configuration unchanged; keeping the running service.${plain}\n"
         fi
         rc-update add fail2ban
     else
         if ! systemctl is-active --quiet fail2ban; then
             systemctl start fail2ban
-        else
+        elif fail2ban_restart_needed "$f2b_config_before" "$f2b_config_after"; then
             systemctl restart fail2ban
+        else
+            echo -e "${green}Fail2ban configuration unchanged; keeping the running service.${plain}\n"
         fi
         systemctl enable fail2ban
     fi
 
     echo -e "${green}IP Limit installed and configured successfully!${plain}\n"
     return 0
+}
+
+# fail2ban_iplimit_config_fingerprint prints a checksum of every fail2ban file
+# that setup_fail2ban_iplimit may create or edit. Missing files hash as empty.
+fail2ban_iplimit_config_fingerprint() {
+    local file
+    for file in \
+        /etc/fail2ban/fail2ban.conf \
+        /etc/fail2ban/jail.conf \
+        /etc/fail2ban/jail.local \
+        /etc/fail2ban/jail.d/3x-ipl.conf \
+        /etc/fail2ban/filter.d/3x-ipl.conf \
+        /etc/fail2ban/action.d/3x-ipl.conf; do
+        printf '%s ' "$file"
+        if [[ -f "$file" ]]; then cksum < "$file"; else echo missing; fi
+    done | cksum
+}
+
+# fail2ban_restart_needed reports whether a running fail2ban must be restarted:
+# when its configuration changed, or when the 3x-ipl jail is not loaded.
+fail2ban_restart_needed() {
+    [[ "$1" != "$2" ]] && return 0
+    fail2ban-client status 3x-ipl > /dev/null 2>&1 || return 0
+    return 1
 }
 
 # install_iplimit is the interactive (menu) entry point: it runs the shared

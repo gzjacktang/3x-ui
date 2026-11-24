@@ -138,7 +138,21 @@ load_xui_env() {
     fi
 }
 
+# Report whether every runtime dependency install_base would install is already
+# present, so routine updates can skip refreshing package indexes.
+base_deps_present() {
+    local cmd
+    for cmd in curl tar socat openssl crontab; do
+        command -v "$cmd" > /dev/null 2>&1 || return 1
+    done
+    [[ -d /usr/share/zoneinfo ]] || return 1
+}
+
 install_base() {
+    if [[ "${XUI_FORCE_DEPS:-0}" != "1" ]] && base_deps_present; then
+        echo -e "${green}Dependency packages are already present; skipping package refresh.${plain}"
+        return 0
+    fi
     echo -e "${green}Updating and install dependency packages...${plain}"
     case "${release}" in
         ubuntu | debian | armbian)
